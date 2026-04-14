@@ -1,142 +1,39 @@
-import { ENTRY_Q, LANGUAGES, TERRAINS } from "./config.js";
+import {
+  MAKER_SUGGESTIONS,
+  MAX_SOURCE_TEXT_LENGTH,
+  createEmptyBotConfig,
+  getLanguageLabel,
+  normalizeBotConfig,
+} from "./config.js";
+import {
+  PDF_MAX_FILE_BYTES,
+  PDF_MAX_PAGE_COUNT,
+  extractPdfSourceText,
+} from "./pdf-tools.js";
 
-const STORAGE_KEY = "terrain-explorer-state-v2";
-const SESSION_KEY = "terrain-explorer-session-id";
-
-const UI_TEXT = {
-  ko: {
-    introTitle: "지형 탐험 도우미",
-    introCopy:
-      "원안의 수업 흐름을 그대로 살려, 아이들이 지형의 모습과 자원을 차근차근 묻도록 만든 챗봇입니다.",
-    info1Label: "AI Model",
-    info1Value: "Kimi 2.5",
-    info2Label: "수업 흐름",
-    info2Value: "모습 → 자원 → 하는 일",
-    info3Label: "기록 상태",
-    info3Value: "브라우저 자동 저장 + 서버 로그",
-    languageTitle: "대화에 쓸 언어를 고르세요.",
-    languageCopy: "학생이 편하게 시작할 수 있도록 먼저 언어를 정합니다.",
-    terrainTitle: "탐험할 지형을 골라 주세요.",
-    terrainCopy: "원안의 흐름에 맞춰 산지, 하천, 해안 중 하나를 선택합니다.",
-    terrainBack: "언어 다시 선택",
-    chatCopy:
-      "첫 질문 버튼을 누르면 원안에 맞는 시작 질문이 자동으로 들어갑니다.",
-    reset: "처음으로",
-    clearChat: "대화 초기화",
-    exportChat: "대화 내보내기",
-    placeholder: "궁금한 것을 물어봐!",
-    helper:
-      "대화는 이 브라우저에 자동 저장되고, 서버의 logs 폴더에도 기록됩니다.",
-    send: "보내기",
-    startHint: "여기를 눌러 시작!",
-    emptyError: "질문을 먼저 적어 주세요.",
-    languageCaption: "학생에게 보여 줄 언어를 이 기준으로 맞춥니다.",
-    statusLabel: "현재 세션",
-    userLabel: "학생",
-    assistantLabel: "도우미",
-    exportTitle: "지형 탐험 도우미 대화 기록",
-  },
-  zh: {
-    introTitle: "地形探索助手",
-    introCopy:
-      "这个聊天机器人保留了原案中的课堂流程，让学生一步一步地提问。",
-    info1Label: "AI Model",
-    info1Value: "Kimi 2.5",
-    info2Label: "学习流程",
-    info2Value: "样子 → 资源 → 做什么",
-    info3Label: "记录状态",
-    info3Value: "浏览器自动保存 + 服务器日志",
-    languageTitle: "请选择对话语言。",
-    languageCopy: "先选语言，再进入地形学习。",
-    terrainTitle: "请选择要探索的地形。",
-    terrainCopy: "按照原案流程，在山地、河流、海岸中选择一个。",
-    terrainBack: "重新选择语言",
-    chatCopy: "点击起始问题按钮，就会自动发送符合原案的第一句提问。",
-    reset: "重新开始",
-    clearChat: "清空对话",
-    exportChat: "导出对话",
-    placeholder: "请输入问题...",
-    helper: "对话会自动保存在浏览器中，也会写入服务器 logs 文件夹。",
-    send: "发送",
-    startHint: "点击这里开始！",
-    emptyError: "请先输入问题。",
-    languageCaption: "按这个语言来显示学生看到的界面。",
-    statusLabel: "当前会话",
-    userLabel: "学生",
-    assistantLabel: "助手",
-    exportTitle: "地形探索助手对话记录",
-  },
-  ru: {
-    introTitle: "Помощник по изучению рельефа",
-    introCopy:
-      "Чат-бот повторяет структуру исходного плана и ведет ученика по шагам.",
-    info1Label: "AI Model",
-    info1Value: "Kimi 2.5",
-    info2Label: "Порядок урока",
-    info2Value: "вид → ресурсы → чем занимаются",
-    info3Label: "Состояние истории",
-    info3Value: "автосохранение + серверный лог",
-    languageTitle: "Выберите язык общения.",
-    languageCopy: "Сначала выбираем язык, потом переходим к выбору рельефа.",
-    terrainTitle: "Выберите рельеф для изучения.",
-    terrainCopy: "Можно выбрать горы, реку или побережье по исходному сценарию.",
-    terrainBack: "Сменить язык",
-    chatCopy:
-      "Кнопка стартового вопроса отправляет первую фразу по структуре исходного плана.",
-    reset: "Сначала",
-    clearChat: "Очистить диалог",
-    exportChat: "Экспорт диалога",
-    placeholder: "Задайте вопрос...",
-    helper:
-      "Диалог автоматически сохраняется в браузере и записывается в папку logs на сервере.",
-    send: "Отправить",
-    startHint: "Нажмите, чтобы начать!",
-    emptyError: "Сначала введите вопрос.",
-    languageCaption: "Интерфейс ученика будет показан на этом языке.",
-    statusLabel: "Текущая сессия",
-    userLabel: "Ученик",
-    assistantLabel: "Помощник",
-    exportTitle: "История диалога помощника по рельефу",
-  },
-};
-
-const TERRAIN_CAPTIONS = {
-  mountain: {
-    ko: "높은 땅, 꼬불꼬불한 길, 산의 자원을 알아봐요.",
-    zh: "看看高高的山地、弯弯的路和山里的资源。",
-    ru: "Узнаем про высокие горы, извилистые дороги и горные ресурсы.",
-  },
-  river: {
-    ko: "넓고 평평한 곳, 강 주변의 자원을 배워요.",
-    zh: "学习平坦开阔的地方和河流周围的资源。",
-    ru: "Изучим ровные места и ресурсы вокруг реки.",
-  },
-  coast: {
-    ko: "바다와 섬, 갯벌과 항구 이야기를 시작해요.",
-    zh: "开始了解大海、岛屿、滩涂和港口。",
-    ru: "Поговорим о море, островах, приливных отмелях и портах.",
-  },
-};
+const STORAGE_KEY = "chatbot-maker-state-v2";
+const SESSION_KEY = "chatbot-maker-session-id";
 
 const app = document.getElementById("app");
-
 const state = loadInitialState();
 
 function loadInitialState() {
   const persisted = readPersistedState();
-  const lang = isValidLang(persisted.lang) ? persisted.lang : null;
-  const terrain = lang && isValidTerrain(lang, persisted.terrain) ? persisted.terrain : null;
-  const messages = sanitizeMessages(persisted.messages);
-  const sessionId = getSessionId();
 
   return {
-    sessionId,
-    lang,
-    terrain,
-    messages,
-    loading: false,
-    started: messages.length > 0 ? true : Boolean(persisted.started && terrain),
-    lastSavedAt: typeof persisted.lastSavedAt === "string" ? persisted.lastSavedAt : null,
+    sessionId: getSessionId(),
+    makerBrief: readText(persisted.makerBrief, 3000),
+    sourceText: readText(persisted.sourceText, MAX_SOURCE_TEXT_LENGTH),
+    uploadedPdfMeta: normalizeUploadedPdfMeta(persisted.uploadedPdfMeta),
+    botConfig: persisted.botConfig ? normalizeBotConfig(persisted.botConfig) : null,
+    messages: sanitizeMessages(persisted.messages),
+    loadingPdf: false,
+    loadingMake: false,
+    loadingChat: false,
+    isDragActive: false,
+    makeError: "",
+    lastSavedAt:
+      typeof persisted.lastSavedAt === "string" ? persisted.lastSavedAt : null,
   };
 }
 
@@ -154,17 +51,42 @@ function persistState() {
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        sessionId: state.sessionId,
-        lang: state.lang,
-        terrain: state.terrain,
+        makerBrief: state.makerBrief,
+        sourceText: state.sourceText,
+        uploadedPdfMeta: state.uploadedPdfMeta,
+        botConfig: state.botConfig,
         messages: state.messages,
-        started: state.started,
         lastSavedAt: state.lastSavedAt,
       }),
     );
   } catch {
-    // Ignore storage failures so the chat can still run.
+    // Ignore storage failures so the app can still run.
   }
+}
+
+function readText(value, maxLength) {
+  return typeof value === "string" ? value.slice(0, maxLength) : "";
+}
+
+function normalizeUploadedPdfMeta(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return {
+    fileName: readText(value.fileName, 220),
+    fileSize: toSafeNumber(value.fileSize),
+    pageCount: toSafeNumber(value.pageCount),
+    ocrPageCount: toSafeNumber(value.ocrPageCount),
+    extractedCharCount: toSafeNumber(value.extractedCharCount),
+    truncated: Boolean(value.truncated),
+    extractionStatus: readText(value.extractionStatus, 80) || "완료",
+    extractionError: readText(value.extractionError, 240),
+  };
+}
+
+function toSafeNumber(value) {
+  return Number.isFinite(Number(value)) ? Number(value) : 0;
 }
 
 function getSessionId() {
@@ -213,37 +135,39 @@ function sanitizeMessages(messages) {
     return [];
   }
 
-  return messages.filter(
-    (message) =>
-      message &&
-      (message.role === "user" || message.role === "assistant") &&
-      typeof message.content === "string" &&
-      message.content.trim(),
-  );
+  return messages
+    .filter(
+      (message) =>
+        message &&
+        (message.role === "user" || message.role === "assistant") &&
+        typeof message.content === "string" &&
+        message.content.trim(),
+    )
+    .map((message) => ({
+      role: message.role,
+      content: message.content.trim(),
+    }));
 }
 
-function isValidLang(lang) {
-  return LANGUAGES.some((item) => item.code === lang);
+function setState(patch, options = {}) {
+  const { persist = true, updateSavedAt = persist } = options;
+
+  Object.assign(state, patch);
+
+  if (updateSavedAt) {
+    state.lastSavedAt = new Date().toISOString();
+  }
+
+  if (persist) {
+    persistState();
+  }
+
+  render();
 }
 
-function isValidTerrain(lang, terrain) {
-  return Boolean((TERRAINS[lang] || []).some((item) => item.code === terrain));
-}
-
-function getCopy() {
-  return UI_TEXT[state.lang || "ko"];
-}
-
-function getTerrainList() {
-  return TERRAINS[state.lang || "ko"] || TERRAINS.ko;
-}
-
-function getTerrain() {
-  return getTerrainList().find((item) => item.code === state.terrain);
-}
-
-function getLanguage() {
-  return LANGUAGES.find((item) => item.code === state.lang) || LANGUAGES[0];
+function persistDraft() {
+  state.lastSavedAt = new Date().toISOString();
+  persistState();
 }
 
 function shortSessionId() {
@@ -256,7 +180,9 @@ function formatSavedAt() {
   }
 
   try {
-    return new Intl.DateTimeFormat(state.lang || "ko", {
+    return new Intl.DateTimeFormat("ko-KR", {
+      month: "2-digit",
+      day: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
     }).format(new Date(state.lastSavedAt));
@@ -265,400 +191,291 @@ function formatSavedAt() {
   }
 }
 
-function setState(patch) {
-  Object.assign(state, patch);
-  state.lastSavedAt = new Date().toISOString();
-  persistState();
-  render();
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0B";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  const exponent = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1,
+  );
+  const value = bytes / 1024 ** exponent;
+
+  return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)}${units[exponent]}`;
 }
 
-function resetState() {
+function resetWorkspace() {
   Object.assign(state, {
     sessionId: renewSessionId(),
-    lang: null,
-    terrain: null,
+    makerBrief: "",
+    sourceText: "",
+    uploadedPdfMeta: null,
+    botConfig: null,
     messages: [],
-    loading: false,
-    started: false,
+    loadingPdf: false,
+    loadingMake: false,
+    loadingChat: false,
+    isDragActive: false,
+    makeError: "",
     lastSavedAt: new Date().toISOString(),
   });
   persistState();
   render();
+}
+
+function clearInputs() {
+  setState({
+    makerBrief: "",
+    sourceText: "",
+    uploadedPdfMeta: null,
+    makeError: "",
+  });
 }
 
 function clearConversation() {
-  Object.assign(state, {
+  setState({
     sessionId: renewSessionId(),
     messages: [],
-    loading: false,
-    started: false,
-    lastSavedAt: new Date().toISOString(),
   });
-  persistState();
-  render();
 }
 
-function exportConversation() {
-  if (!state.messages.length) {
+function applyBotConfigEdits() {
+  if (!state.botConfig) {
     return;
   }
 
-  const copy = getCopy();
-  const language = getLanguage();
-  const terrain = getTerrain();
+  setState({
+    sessionId: renewSessionId(),
+    botConfig: normalizeBotConfig(state.botConfig),
+    messages: [],
+  });
+}
+
+function exportBotConfig() {
+  if (!state.botConfig) {
+    return;
+  }
+
+  const fileName = `${slugify(state.botConfig.name || "custom-bot")}.json`;
+  downloadBlob(
+    fileName,
+    JSON.stringify(normalizeBotConfig(state.botConfig), null, 2),
+    "application/json;charset=utf-8",
+  );
+}
+
+function exportConversation() {
+  if (!state.botConfig || !state.messages.length) {
+    return;
+  }
+
   const lines = [
-    copy.exportTitle,
-    `Exported at: ${new Date().toLocaleString()}`,
+    `Bot: ${state.botConfig.name}`,
+    `Tagline: ${state.botConfig.tagline}`,
+    `Language: ${getLanguageLabel(state.botConfig.language)}`,
+    `Exported At: ${new Date().toLocaleString()}`,
     `Session ID: ${state.sessionId}`,
-    `Language: ${language.label}`,
-    `Terrain: ${terrain?.label || "-"}`,
     "",
   ];
 
   state.messages.forEach((message, index) => {
     lines.push(
-      `[${index + 1}] ${message.role === "user" ? copy.userLabel : copy.assistantLabel}`,
+      `[${index + 1}] ${message.role === "user" ? "User" : state.botConfig.name}`,
     );
     lines.push(message.content);
     lines.push("");
   });
 
-  const blob = new Blob([lines.join("\n")], {
-    type: "text/plain;charset=utf-8",
-  });
+  downloadBlob(
+    `${slugify(state.botConfig.name || "bot")}-chat.txt`,
+    lines.join("\n"),
+    "text/plain;charset=utf-8",
+  );
+}
+
+function downloadBlob(fileName, content, type) {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
-  const stamp = new Date().toISOString().replaceAll(":", "-").replace(/\..+/, "");
 
   anchor.href = url;
-  anchor.download = `terrain-chat-${stamp}.txt`;
+  anchor.download = fileName;
   anchor.click();
 
   URL.revokeObjectURL(url);
 }
 
-function createSidebar(copy) {
-  const sidebar = document.createElement("aside");
-  sidebar.className = "panel sidebar";
-  sidebar.innerHTML = `
-    <div class="brand">
-      <div class="brand-head">
-        <img class="brand-mark" src="/brand-mark.svg" alt="Terrain Explorer" />
-        <div class="badge">🗺️ Geography Lab</div>
-      </div>
-      <h1 class="title">${copy.introTitle}</h1>
-      <p class="subtitle">${copy.introCopy}</p>
-    </div>
-    <div class="fact-list">
-      <article class="fact-card">
-        <span class="fact-label">${copy.info1Label}</span>
-        <div class="fact-value">${copy.info1Value}</div>
-      </article>
-      <article class="fact-card">
-        <span class="fact-label">${copy.info2Label}</span>
-        <div class="fact-value">${copy.info2Value}</div>
-      </article>
-      <article class="fact-card">
-        <span class="fact-label">${copy.info3Label}</span>
-        <div class="fact-value">${copy.info3Value}</div>
-      </article>
-    </div>
-    <div class="brand-note">
-      <span>${copy.statusLabel}</span>
-      <strong>${shortSessionId()}</strong>
-      <em>${formatSavedAt()}</em>
-    </div>
-  `;
-  return sidebar;
+function slugify(value) {
+  return String(value || "chatbot")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
 }
 
-function createActionButton({
-  label,
-  className = "ghost-button",
-  onClick,
-  disabled = false,
-}) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = className;
-  button.textContent = label;
-  button.disabled = disabled;
-  button.addEventListener("click", onClick);
-  return button;
+function parseLines(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
-function createScreen(title, description, actions = []) {
-  const screen = document.createElement("section");
-  screen.className = "screen";
+function joinLines(items) {
+  return Array.isArray(items) ? items.join("\n") : "";
+}
 
-  const header = document.createElement("div");
-  header.className = "screen-header";
+function removePdfAndText() {
+  setState({
+    uploadedPdfMeta: null,
+    sourceText: "",
+    makeError: "",
+  });
+}
 
-  const left = document.createElement("div");
-  left.innerHTML = `
-    <div>
-      <p class="eyebrow">Classroom Flow</p>
-      <h2 class="screen-title">${title}</h2>
-      <p class="screen-copy">${description}</p>
-    </div>
-  `;
-  header.appendChild(left);
+function keepExtractedTextOnly() {
+  setState({
+    uploadedPdfMeta: null,
+    makeError: "",
+  });
+}
 
-  if (actions.length) {
-    const cluster = document.createElement("div");
-    cluster.className = "action-cluster";
-    actions.forEach((action) => cluster.appendChild(action));
-    header.appendChild(cluster);
+function canGenerateBot() {
+  if (state.loadingPdf || state.loadingMake || state.loadingChat) {
+    return false;
   }
 
-  screen.appendChild(header);
-  return screen;
+  return Boolean(state.makerBrief.trim() || state.sourceText.trim());
 }
 
-function createLanguageScreen(copy) {
-  const screen = createScreen(copy.languageTitle, copy.languageCopy);
-  const grid = document.createElement("div");
-  grid.className = "card-grid";
+async function handlePdfSelection(file) {
+  if (!file) {
+    return;
+  }
 
-  LANGUAGES.forEach((language) => {
-    const button = document.createElement("button");
-    button.className = "select-card";
-    button.innerHTML = `
-      <span class="emoji">${language.flag}</span>
-      <span class="label">${language.label}</span>
-      <span class="caption">${copy.languageCaption}</span>
-    `;
-    button.addEventListener("click", () => {
-      setState({
-        lang: language.code,
-        terrain: null,
-        messages: [],
-        started: false,
-        loading: false,
-        sessionId: renewSessionId(),
-      });
-    });
-    grid.appendChild(button);
-  });
+  const previousMeta = state.uploadedPdfMeta;
+  const previousSourceText = state.sourceText;
 
-  screen.appendChild(grid);
-  return screen;
-}
-
-function createTerrainScreen(copy) {
-  const screen = createScreen(copy.terrainTitle, copy.terrainCopy, [
-    createActionButton({
-      label: copy.terrainBack,
-      onClick: () => {
-        setState({
-          lang: null,
-          terrain: null,
-          messages: [],
-          started: false,
-          loading: false,
-          sessionId: renewSessionId(),
-        });
+  setState(
+    {
+      loadingPdf: true,
+      isDragActive: false,
+      makeError: "",
+      uploadedPdfMeta: {
+        fileName: file.name,
+        fileSize: file.size,
+        pageCount: 0,
+        ocrPageCount: 0,
+        extractedCharCount: 0,
+        truncated: false,
+        extractionStatus: "업로드 확인 중",
+        extractionError: "",
       },
-    }),
-  ]);
-
-  const grid = document.createElement("div");
-  grid.className = "card-grid";
-
-  getTerrainList().forEach((terrain) => {
-    const button = document.createElement("button");
-    button.className = "select-card";
-    button.innerHTML = `
-      <span class="emoji">${terrain.emoji}</span>
-      <span class="label">${terrain.label}</span>
-      <span class="caption">${TERRAIN_CAPTIONS[terrain.code][state.lang]}</span>
-    `;
-    button.addEventListener("click", () => {
-      setState({
-        terrain: terrain.code,
-        messages: [],
-        loading: false,
-        started: false,
-        sessionId: renewSessionId(),
-      });
-    });
-    grid.appendChild(button);
-  });
-
-  screen.appendChild(grid);
-  return screen;
-}
-
-function createMessageRow(message) {
-  const row = document.createElement("div");
-  row.className = `message-row ${message.role}`;
-
-  if (message.role === "assistant") {
-    const avatar = document.createElement("div");
-    avatar.className = "message-avatar";
-    avatar.textContent = "🌍";
-    row.appendChild(avatar);
-  }
-
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-  bubble.textContent = message.content;
-  row.appendChild(bubble);
-
-  return row;
-}
-
-function createTypingRow() {
-  const row = document.createElement("div");
-  row.className = "message-row assistant";
-
-  const avatar = document.createElement("div");
-  avatar.className = "message-avatar";
-  avatar.textContent = "🌍";
-
-  const typing = document.createElement("div");
-  typing.className = "typing";
-  typing.innerHTML = "<span></span><span></span><span></span>";
-
-  row.append(avatar, typing);
-  return row;
-}
-
-function createChatScreen(copy) {
-  const terrain = getTerrain();
-  const label = getLanguage();
-  const actions = [
-    createActionButton({
-      label: copy.exportChat,
-      className: "mini-button",
-      disabled: !state.messages.length || state.loading,
-      onClick: exportConversation,
-    }),
-    createActionButton({
-      label: copy.clearChat,
-      className: "mini-button",
-      disabled: state.loading,
-      onClick: clearConversation,
-    }),
-    createActionButton({
-      label: copy.reset,
-      onClick: resetState,
-      disabled: state.loading,
-    }),
-  ];
-
-  const screen = createScreen(
-    `${terrain.label} ${
-      state.lang === "ko" ? "탐험" : state.lang === "zh" ? "探索" : "исследование"
-    }`,
-    copy.chatCopy,
-    actions,
+    },
+    { persist: false, updateSavedAt: false },
   );
 
-  const chatShell = document.createElement("div");
-  chatShell.className = "chat-shell";
-
-  const meta = document.createElement("div");
-  meta.className = "meta-row";
-  meta.innerHTML = `
-    <span class="status-pill">${label.flag} ${label.label}</span>
-    <span class="meta-tag">${copy.statusLabel}: ${shortSessionId()}</span>
-  `;
-  chatShell.appendChild(meta);
-
-  if (!state.started) {
-    const hero = document.createElement("section");
-    hero.className = "chat-hero";
-    hero.innerHTML = `
-      <div class="hero-icon">${terrain.emoji}</div>
-      <h3 class="hero-title">${ENTRY_Q[state.terrain][state.lang]}</h3>
-      <p class="hero-copy">${copy.startHint}</p>
-    `;
-
-    const startButton = document.createElement("button");
-    startButton.className = "primary-button";
-    startButton.textContent = ENTRY_Q[state.terrain][state.lang];
-    startButton.addEventListener("click", () => {
-      void sendMessage(ENTRY_Q[state.terrain][state.lang]);
+  try {
+    const result = await extractPdfSourceText(file, (meta) => {
+      setState(
+        {
+          uploadedPdfMeta: normalizeUploadedPdfMeta(meta),
+          loadingPdf: true,
+          makeError: "",
+        },
+        { persist: false, updateSavedAt: false },
+      );
     });
 
-    hero.appendChild(startButton);
-    chatShell.appendChild(hero);
+    setState({
+      uploadedPdfMeta: normalizeUploadedPdfMeta(result.meta),
+      sourceText: result.sourceText,
+      loadingPdf: false,
+      makeError: "",
+    });
+  } catch (error) {
+    setState({
+      uploadedPdfMeta: previousMeta,
+      sourceText: previousSourceText,
+      loadingPdf: false,
+      makeError:
+        error instanceof Error
+          ? error.message
+          : "PDF를 처리하지 못했습니다. 다른 파일로 다시 시도해 주세요.",
+    });
+  }
+}
+
+async function generateBot() {
+  const brief = state.makerBrief.trim();
+  const sourceText = state.sourceText.trim();
+
+  if (!brief && !sourceText) {
+    setState({
+      makeError: "챗봇의 목적이나 참고 자료를 먼저 입력해 주세요.",
+    });
+    return;
   }
 
-  const log = document.createElement("div");
-  log.className = "chat-log";
-  log.id = "chat-log";
+  setState(
+    {
+      loadingMake: true,
+      makeError: "",
+    },
+    { persist: false, updateSavedAt: false },
+  );
 
-  state.messages.forEach((message) => {
-    log.appendChild(createMessageRow(message));
-  });
+  try {
+    const response = await fetch("/api/make-bot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: state.sessionId,
+        brief,
+        sourceText,
+      }),
+    });
 
-  if (state.loading) {
-    log.appendChild(createTypingRow());
-  }
+    const data = await response.json().catch(() => ({}));
 
-  chatShell.appendChild(log);
-
-  const composer = document.createElement("form");
-  composer.className = "composer";
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.placeholder = copy.placeholder;
-  input.autocomplete = "off";
-  input.disabled = state.loading;
-
-  const sendButton = document.createElement("button");
-  sendButton.type = "submit";
-  sendButton.textContent = "↑";
-  sendButton.title = copy.send;
-  sendButton.disabled = state.loading;
-
-  composer.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const value = input.value.trim();
-
-    if (!value) {
-      input.setCustomValidity(copy.emptyError);
-      input.reportValidity();
-      return;
+    if (!response.ok) {
+      throw new Error(data.error || "챗봇 설계안을 생성하지 못했습니다.");
     }
 
-    input.setCustomValidity("");
-    void sendMessage(value);
-  });
-
-  composer.append(input, sendButton);
-  chatShell.appendChild(composer);
-
-  const helper = document.createElement("p");
-  helper.className = "helper-line";
-  helper.textContent = copy.helper;
-  chatShell.appendChild(helper);
-
-  screen.appendChild(chatShell);
-
-  queueMicrotask(() => {
-    const chatLog = document.getElementById("chat-log");
-    chatLog?.scrollTo({ top: chatLog.scrollHeight, behavior: "smooth" });
-  });
-
-  return screen;
+    setState({
+      sessionId: renewSessionId(),
+      botConfig: normalizeBotConfig(data.botConfig || createEmptyBotConfig()),
+      messages: [],
+      loadingMake: false,
+      makeError: "",
+    });
+  } catch (error) {
+    setState({
+      loadingMake: false,
+      makeError:
+        error instanceof Error
+          ? error.message
+          : "챗봇 설계안을 생성하지 못했습니다.",
+    });
+  }
 }
 
 async function sendMessage(text) {
-  if (!text.trim() || state.loading) {
+  if (!state.botConfig || state.loadingChat || !text.trim()) {
     return;
   }
 
   const nextMessages = [...state.messages, { role: "user", content: text.trim() }];
 
-  setState({
-    messages: nextMessages,
-    loading: true,
-    started: true,
-  });
+  setState(
+    {
+      messages: nextMessages,
+      loadingChat: true,
+    },
+    { persist: true, updateSavedAt: false },
+  );
 
   try {
     const response = await fetch("/api/chat", {
@@ -666,8 +483,7 @@ async function sendMessage(text) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sessionId: state.sessionId,
-        lang: state.lang,
-        terrain: state.terrain,
+        botConfig: normalizeBotConfig(state.botConfig),
         messages: nextMessages,
       }),
     });
@@ -680,7 +496,7 @@ async function sendMessage(text) {
 
     setState({
       messages: [...nextMessages, { role: "assistant", content: data.message }],
-      loading: false,
+      loadingChat: false,
     });
   } catch (error) {
     setState({
@@ -691,34 +507,979 @@ async function sendMessage(text) {
           content:
             error instanceof Error
               ? error.message
-              : "인터넷을 확인하거나 다시 질문해 줘! 🔌",
+              : "응답을 받는 데 실패했습니다. 잠시 후 다시 시도해 주세요.",
         },
       ],
-      loading: false,
+      loadingChat: false,
     });
   }
 }
 
-function render() {
-  const copy = getCopy();
+function createElement(tag, className, text) {
+  const node = document.createElement(tag);
 
-  app.replaceChildren();
-
-  const page = document.createElement("div");
-  page.className = "page";
-  page.appendChild(createSidebar(copy));
-
-  const main = document.createElement("main");
-  main.className = "panel main-panel";
-
-  if (!state.lang) {
-    main.appendChild(createLanguageScreen(copy));
-  } else if (!state.terrain) {
-    main.appendChild(createTerrainScreen(copy));
-  } else {
-    main.appendChild(createChatScreen(copy));
+  if (className) {
+    node.className = className;
   }
 
+  if (typeof text === "string") {
+    node.textContent = text;
+  }
+
+  return node;
+}
+
+function createButton({
+  label,
+  className,
+  onClick,
+  disabled = false,
+  type = "button",
+}) {
+  const button = createElement("button", className, label);
+  button.type = type;
+  button.disabled = disabled;
+
+  if (typeof onClick === "function") {
+    button.addEventListener("click", onClick);
+  }
+
+  return button;
+}
+
+function createHeaderChip(text) {
+  return createElement("span", "header-chip", text);
+}
+
+function createSectionCard(step, title, description) {
+  const card = createElement("section", "section-card");
+  const header = createElement("div", "section-head");
+  const stepBadge = createElement("div", "step-badge", step);
+  const textWrap = createElement("div", "section-copy");
+  const titleNode = createElement("h2", "section-title", title);
+  const descriptionNode = createElement("p", "section-desc", description);
+
+  textWrap.append(titleNode, descriptionNode);
+  header.append(stepBadge, textWrap);
+  card.appendChild(header);
+
+  return card;
+}
+
+function createField(label, hint, input) {
+  const wrapper = createElement("label", "field");
+  const top = createElement("div", "field-top");
+  const labelNode = createElement("span", "field-label", label);
+  const hintNode = createElement("span", "field-hint", hint);
+
+  top.append(labelNode, hintNode);
+  wrapper.append(top, input);
+
+  return wrapper;
+}
+
+function createInput(value, placeholder, onInput) {
+  const input = document.createElement("input");
+  input.className = "text-input";
+  input.type = "text";
+  input.value = value;
+  input.placeholder = placeholder;
+  input.addEventListener("input", () => onInput(input.value));
+  return input;
+}
+
+function createTextarea(value, placeholder, rows, onInput) {
+  const textarea = document.createElement("textarea");
+  textarea.className = "text-area";
+  textarea.rows = rows;
+  textarea.value = value;
+  textarea.placeholder = placeholder;
+  textarea.addEventListener("input", () => onInput(textarea.value));
+  return textarea;
+}
+
+function createSelect(value, options, onChange) {
+  const select = document.createElement("select");
+  select.className = "text-select";
+
+  options.forEach((option) => {
+    const node = document.createElement("option");
+    node.value = option.value;
+    node.textContent = option.label;
+
+    if (option.value === value) {
+      node.selected = true;
+    }
+
+    select.appendChild(node);
+  });
+
+  select.addEventListener("change", () => onChange(select.value));
+  return select;
+}
+
+function createInfoList(title, items) {
+  const card = createElement("article", "info-card");
+  const titleNode = createElement("div", "info-label", title);
+  const list = createElement("div", "info-list");
+
+  items.forEach((item) => {
+    const row = createElement("div", "info-item", item);
+    list.appendChild(row);
+  });
+
+  card.append(titleNode, list);
+  return card;
+}
+
+function createSidebar() {
+  const sidebar = createElement("aside", "panel sidebar");
+  const brand = createElement("div", "brand");
+  const brandHead = createElement("div", "brand-head");
+  const logo = document.createElement("img");
+  logo.className = "brand-mark";
+  logo.src = "/brand-mark.svg";
+  logo.alt = "Chatbot Maker";
+  const badge = createHeaderChip("Moonshot / Kimi");
+
+  brandHead.append(logo, badge);
+  brand.appendChild(brandHead);
+  brand.appendChild(createElement("h1", "brand-title", "챗봇 메이커"));
+  brand.appendChild(
+    createElement(
+      "p",
+      "brand-copy",
+      "원하는 역할과 자료를 넣으면, 설계안 생성부터 테스트 대화까지 한 화면에서 바로 진행합니다. PDF를 올리면 텍스트 추출과 OCR도 브라우저에서 처리합니다.",
+    ),
+  );
+
+  if (state.botConfig) {
+    const activeBot = createElement("div", "active-bot");
+    activeBot.appendChild(createElement("span", "active-bot-label", "현재 설계"));
+    activeBot.appendChild(
+      createElement("strong", "active-bot-name", state.botConfig.name),
+    );
+    activeBot.appendChild(
+      createElement("p", "active-bot-copy", state.botConfig.tagline),
+    );
+    brand.appendChild(activeBot);
+  }
+
+  const facts = createElement("div", "info-stack");
+  facts.append(
+    createInfoList("Flow", ["기획 입력", "PDF 추출", "설계안 생성", "바로 테스트"]),
+    createInfoList("Runtime", ["API 키는 서버 전용", "Moonshot으로 생성/응답"]),
+    createInfoList("Privacy", ["원본 PDF는 저장 안 함", "브라우저에 텍스트 초안 저장"]),
+  );
+
+  const footer = createElement("div", "sidebar-footer");
+  footer.appendChild(createElement("span", "footer-label", "Session"));
+  footer.appendChild(createElement("strong", "footer-value", shortSessionId()));
+  footer.appendChild(
+    createElement("span", "footer-muted", `저장 시각 ${formatSavedAt()}`),
+  );
+
+  const resetButton = createButton({
+    label: "워크스페이스 초기화",
+    className: "ghost-button full-width",
+    onClick: resetWorkspace,
+    disabled: state.loadingPdf || state.loadingMake || state.loadingChat,
+  });
+
+  footer.appendChild(resetButton);
+  sidebar.append(brand, facts, footer);
+
+  return sidebar;
+}
+
+function createPdfUploadField() {
+  const wrapper = createElement("div", "field");
+  const top = createElement("div", "field-top");
+  const labelNode = createElement("span", "field-label", "PDF 업로드");
+  const hintNode = createElement(
+    "span",
+    "field-hint",
+    `PDF 1개, 최대 ${PDF_MAX_PAGE_COUNT}페이지 / ${formatBytes(PDF_MAX_FILE_BYTES)}. 텍스트 PDF와 스캔본 OCR을 지원합니다.`,
+  );
+  top.append(labelNode, hintNode);
+  wrapper.appendChild(top);
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".pdf,application/pdf";
+  input.className = "hidden-input";
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    input.value = "";
+    void handlePdfSelection(file);
+  });
+
+  const dropzone = createElement(
+    "div",
+    `pdf-dropzone${state.isDragActive ? " is-active" : ""}${state.loadingPdf ? " is-busy" : ""}`,
+  );
+  dropzone.tabIndex = 0;
+
+  const icon = createElement("div", "pdf-dropzone-icon", "PDF");
+  const textWrap = createElement("div", "pdf-dropzone-copy");
+  textWrap.append(
+    createElement(
+      "strong",
+      "pdf-dropzone-title",
+      state.loadingPdf ? "PDF를 처리하는 중입니다" : "PDF를 끌어다 놓거나 눌러서 선택하세요",
+    ),
+    createElement(
+      "p",
+      "pdf-dropzone-text",
+      state.loadingPdf
+        ? "페이지별 텍스트 추출과 OCR을 순서대로 진행하고 있습니다."
+        : "추출 결과는 참고 자료 칸에 자동으로 들어가고, 그 뒤에 직접 수정할 수 있습니다.",
+    ),
+  );
+
+  const badgeRow = createElement("div", "pdf-badge-row");
+  badgeRow.append(
+    createElement("span", "pdf-badge", "브라우저 처리"),
+    createElement("span", "pdf-badge", "OCR: kor + eng"),
+  );
+
+  dropzone.append(icon, textWrap, badgeRow);
+
+  if (!state.loadingPdf) {
+    dropzone.addEventListener("click", () => input.click());
+    dropzone.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        input.click();
+      }
+    });
+  }
+
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+
+      if (state.loadingPdf) {
+        return;
+      }
+
+      setState(
+        { isDragActive: true },
+        { persist: false, updateSavedAt: false },
+      );
+    });
+  });
+
+  ["dragleave", "dragend"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+
+      if (!state.isDragActive) {
+        return;
+      }
+
+      setState(
+        { isDragActive: false },
+        { persist: false, updateSavedAt: false },
+      );
+    });
+  });
+
+  dropzone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const file = event.dataTransfer?.files?.[0];
+
+    setState(
+      { isDragActive: false },
+      { persist: false, updateSavedAt: false },
+    );
+
+    if (state.loadingPdf) {
+      return;
+    }
+
+    void handlePdfSelection(file);
+  });
+
+  wrapper.append(input, dropzone);
+
+  if (state.uploadedPdfMeta) {
+    wrapper.appendChild(createPdfMetaPanel(() => input.click()));
+  }
+
+  return wrapper;
+}
+
+function createPdfMetaPanel(openPicker) {
+  const meta = state.uploadedPdfMeta;
+  const panel = createElement("div", "pdf-meta-card");
+
+  const head = createElement("div", "pdf-meta-head");
+  const titleWrap = createElement("div", "pdf-meta-copy");
+  titleWrap.append(
+    createElement("span", "pdf-meta-label", "현재 PDF"),
+    createElement("strong", "pdf-meta-name", meta.fileName || "이름 없는 PDF"),
+  );
+  const status = createElement(
+    "span",
+    `pdf-status-pill ${getPdfStatusClass(meta)}`,
+    meta.extractionStatus,
+  );
+  head.append(titleWrap, status);
+
+  const stats = createElement("div", "pdf-stat-grid");
+  stats.append(
+    createPdfStat("파일 크기", formatBytes(meta.fileSize)),
+    createPdfStat("페이지", meta.pageCount ? `${meta.pageCount}p` : "-"),
+    createPdfStat("OCR 적용", meta.ocrPageCount ? `${meta.ocrPageCount}p` : "0p"),
+    createPdfStat("반영 글자 수", meta.extractedCharCount.toLocaleString()),
+  );
+
+  panel.append(head, stats);
+
+  if (meta.truncated) {
+    panel.appendChild(
+      createElement(
+        "div",
+        "warning-banner",
+        "일부 페이지 또는 내용이 50,000자 제한으로 생략되었습니다.",
+      ),
+    );
+  }
+
+  if (meta.extractionError) {
+    panel.appendChild(createElement("div", "warning-banner", meta.extractionError));
+  }
+
+  const actionRow = createElement("div", "action-row");
+  actionRow.append(
+    createButton({
+      label: "PDF 교체",
+      className: "ghost-button",
+      onClick: openPicker,
+      disabled: state.loadingPdf,
+    }),
+    createButton({
+      label: "PDF 제거",
+      className: "ghost-button",
+      onClick: removePdfAndText,
+      disabled: state.loadingPdf,
+    }),
+    createButton({
+      label: "추출 텍스트만 유지",
+      className: "ghost-button",
+      onClick: keepExtractedTextOnly,
+      disabled: state.loadingPdf,
+    }),
+  );
+  panel.appendChild(actionRow);
+
+  panel.appendChild(
+    createElement(
+      "p",
+      "section-note",
+      "PDF 제거는 참고 자료 칸도 함께 비웁니다. 텍스트만 남기려면 '추출 텍스트만 유지'를 사용하세요.",
+    ),
+  );
+
+  return panel;
+}
+
+function createPdfStat(label, value) {
+  const item = createElement("div", "pdf-stat");
+  item.append(
+    createElement("span", "pdf-stat-label", label),
+    createElement("strong", "pdf-stat-value", value),
+  );
+  return item;
+}
+
+function getPdfStatusClass(meta) {
+  if (state.loadingPdf) {
+    return "is-busy";
+  }
+
+  if (meta.extractionError || meta.truncated) {
+    return "is-warning";
+  }
+
+  return "is-ready";
+}
+
+function createMakerCard() {
+  const card = createSectionCard(
+    "01",
+    "챗봇 기획",
+    "무엇을 도와야 하는 챗봇인지 설명해 주세요. 직접 붙여 넣은 자료와 PDF 추출 텍스트를 함께 참고 자료로 쓸 수 있습니다.",
+  );
+
+  const layout = createElement("div", "form-stack");
+  const briefField = createTextarea(
+    state.makerBrief,
+    "예: 우리 서비스 소개서와 FAQ를 바탕으로, 신규 고객에게 한국어로 친절하게 설명하는 챗봇을 만들고 싶어.",
+    7,
+    (value) => {
+      state.makerBrief = value.slice(0, 3000);
+      persistDraft();
+    },
+  );
+  layout.appendChild(
+    createField(
+      "의도 설명",
+      "챗봇의 역할, 대상, 말투, 목적을 적어 주세요.",
+      briefField,
+    ),
+  );
+
+  const chipRow = createElement("div", "chip-row");
+  MAKER_SUGGESTIONS.forEach((suggestion) => {
+    chipRow.appendChild(
+      createButton({
+        label: suggestion,
+        className: "chip-button",
+        onClick: () => {
+          const nextBrief = state.makerBrief.trim()
+            ? `${state.makerBrief.trim()}\n${suggestion}`
+            : suggestion;
+          setState({ makerBrief: nextBrief });
+        },
+      }),
+    );
+  });
+  layout.appendChild(chipRow);
+
+  layout.appendChild(createPdfUploadField());
+
+  const sourceField = createTextarea(
+    state.sourceText,
+    "예: 서비스 소개, 제품 설명, 강의안, 운영 규칙, 말투 가이드, Q&A 문서 등을 붙여 넣어 주세요. PDF를 추출하면 이 칸에 자동으로 채워집니다.",
+    10,
+    (value) => {
+      state.sourceText = value.slice(0, MAX_SOURCE_TEXT_LENGTH);
+      persistDraft();
+    },
+  );
+  layout.appendChild(
+    createField(
+      "참고 자료",
+      `${state.sourceText.length.toLocaleString()} / ${MAX_SOURCE_TEXT_LENGTH.toLocaleString()}자. PDF 추출 후에도 직접 수정할 수 있습니다.`,
+      sourceField,
+    ),
+  );
+
+  if (state.makeError) {
+    layout.appendChild(createElement("div", "error-banner", state.makeError));
+  }
+
+  layout.appendChild(
+    createElement(
+      "p",
+      "section-note",
+      "원본 PDF는 저장하지 않습니다. 새로고침 후에는 추출된 텍스트와 PDF 메타정보만 남습니다. OCR은 첫 사용 시 네트워크로 언어 데이터를 내려받을 수 있습니다.",
+    ),
+  );
+
+  const actions = createElement("div", "action-row");
+  actions.append(
+    createButton({
+      label: state.loadingMake ? "설계 생성 중..." : "설계 생성",
+      className: "primary-button",
+      onClick: generateBot,
+      disabled: !canGenerateBot(),
+    }),
+    createButton({
+      label: "입력 비우기",
+      className: "ghost-button",
+      onClick: clearInputs,
+      disabled: state.loadingPdf || state.loadingMake,
+    }),
+  );
+  layout.appendChild(actions);
+
+  card.appendChild(layout);
+  return card;
+}
+
+function createConfigCard() {
+  const card = createSectionCard(
+    "02",
+    "설계안 편집",
+    "생성된 설계안을 다듬고 적용하세요. 적용하면 테스트 대화가 새 세션으로 초기화됩니다.",
+  );
+
+  if (!state.botConfig) {
+    const empty = createElement("div", "empty-state");
+    empty.appendChild(createElement("strong", "empty-title", "설계안이 아직 없습니다."));
+    empty.appendChild(
+      createElement(
+        "p",
+        "empty-copy",
+        "왼쪽 기획 입력과 PDF 참고 자료를 바탕으로 설계안을 생성하면, 여기서 이름과 말투, 가드레일, 시작 질문까지 직접 수정할 수 있습니다.",
+      ),
+    );
+    card.appendChild(empty);
+    return card;
+  }
+
+  const formGrid = createElement("div", "config-grid");
+
+  formGrid.append(
+    createField(
+      "봇 이름",
+      "테스트 화면과 내보내기 파일에 쓰입니다.",
+      createInput(state.botConfig.name, "예: 브랜드 안내 도우미", (value) => {
+        state.botConfig.name = value;
+        persistDraft();
+      }),
+    ),
+    createField(
+      "기본 언어",
+      "주 응답 언어를 정합니다.",
+      createSelect(
+        state.botConfig.language,
+        [
+          { value: "ko", label: "한국어" },
+          { value: "en", label: "English" },
+          { value: "ja", label: "日本語" },
+          { value: "zh", label: "中文" },
+        ],
+        (value) => {
+          state.botConfig.language = value;
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "한줄 소개",
+      "이 챗봇의 핵심 인상을 짧게 적습니다.",
+      createInput(
+        state.botConfig.tagline,
+        "예: 우리 서비스의 첫 응답을 맡는 친절한 안내 챗봇",
+        (value) => {
+          state.botConfig.tagline = value;
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "대상 사용자",
+      "누구를 돕는 챗봇인지 정합니다.",
+      createInput(
+        state.botConfig.targetAudience,
+        "예: 신규 고객, 수강생, 내부 팀원",
+        (value) => {
+          state.botConfig.targetAudience = value;
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "역할",
+      "이 챗봇이 어떤 정체성으로 말할지 적습니다.",
+      createTextarea(
+        state.botConfig.role,
+        "예: 회사 서비스와 운영 정책을 설명하는 고객지원 도우미",
+        3,
+        (value) => {
+          state.botConfig.role = value;
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "핵심 목적",
+      "이 챗봇이 가장 잘해야 하는 일을 적습니다.",
+      createTextarea(
+        state.botConfig.purpose,
+        "예: 고객 질문을 빠르게 분류하고, FAQ 범위에서는 바로 답하고, 그 밖의 경우 다음 절차를 안내한다.",
+        3,
+        (value) => {
+          state.botConfig.purpose = value;
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "말투",
+      "톤과 태도를 지정합니다.",
+      createInput(
+        state.botConfig.tone,
+        "예: 친절하고 차분하며 과장 없는 말투",
+        (value) => {
+          state.botConfig.tone = value;
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "응답 스타일",
+      "길이, 형식, 구조를 정합니다.",
+      createInput(
+        state.botConfig.responseStyle,
+        "예: 짧은 단락 중심, 필요하면 번호 목록으로 안내",
+        (value) => {
+          state.botConfig.responseStyle = value;
+          persistDraft();
+        },
+      ),
+    ),
+  );
+
+  const longFields = createElement("div", "form-stack");
+  longFields.append(
+    createField(
+      "첫 인사",
+      "대화를 시작할 때 보여줄 기본 인사입니다.",
+      createTextarea(
+        state.botConfig.greeting,
+        "예: 안녕하세요. 궁금한 내용을 말씀해 주시면 빠르게 도와드릴게요.",
+        3,
+        (value) => {
+          state.botConfig.greeting = value;
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "핵심 지식 요약",
+      "봇이 꼭 기억해야 할 정보만 간결하게 정리합니다.",
+      createTextarea(
+        state.botConfig.knowledge,
+        "예: 서비스 특징, 정책 요약, 설명해야 할 핵심 기준",
+        6,
+        (value) => {
+          state.botConfig.knowledge = value;
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "참고 자료 원문",
+      "붙여 넣은 자료나 PDF 추출 결과를 유지하거나 직접 수정할 수 있습니다.",
+      createTextarea(
+        state.botConfig.referenceText,
+        "예: 원문 FAQ, 강의노트, 설명 문서 전문",
+        10,
+        (value) => {
+          state.botConfig.referenceText = value.slice(0, MAX_SOURCE_TEXT_LENGTH);
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "반드시 할 것",
+      "줄바꿈으로 한 줄에 하나씩 적어 주세요.",
+      createTextarea(
+        joinLines(state.botConfig.mustDo),
+        "예:\n짧고 분명하게 답한다.\n자료에 없는 내용은 확인을 요청한다.",
+        5,
+        (value) => {
+          state.botConfig.mustDo = parseLines(value);
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "피해야 할 것",
+      "하지 말아야 할 행동을 적습니다.",
+      createTextarea(
+        joinLines(state.botConfig.mustNotDo),
+        "예:\n확인되지 않은 사실을 단정하지 않는다.\n자료에 없는 기능을 지어내지 않는다.",
+        4,
+        (value) => {
+          state.botConfig.mustNotDo = parseLines(value);
+          persistDraft();
+        },
+      ),
+    ),
+    createField(
+      "시작 질문",
+      "테스트 화면에서 바로 눌러볼 질문입니다.",
+      createTextarea(
+        joinLines(state.botConfig.starterQuestions),
+        "예:\n이 챗봇은 어떤 질문에 잘 답해?\n자료를 기준으로 무엇을 설명해 줄 수 있어?",
+        4,
+        (value) => {
+          state.botConfig.starterQuestions = parseLines(value);
+          persistDraft();
+        },
+      ),
+    ),
+  );
+
+  const actions = createElement("div", "action-row");
+  actions.append(
+    createButton({
+      label: "수정 적용",
+      className: "primary-button",
+      onClick: applyBotConfigEdits,
+      disabled: state.loadingPdf || state.loadingMake || state.loadingChat,
+    }),
+    createButton({
+      label: "JSON 내보내기",
+      className: "ghost-button",
+      onClick: exportBotConfig,
+    }),
+  );
+
+  card.append(formGrid, longFields, actions);
+  return card;
+}
+
+function createSummaryCard() {
+  const card = createSectionCard(
+    "03",
+    "설계 미리보기",
+    "현재 설계가 테스트 화면에서 어떻게 동작할지 빠르게 확인합니다.",
+  );
+
+  if (!state.botConfig) {
+    const empty = createElement("div", "empty-state");
+    empty.appendChild(createElement("strong", "empty-title", "봇 미리보기가 아직 없습니다."));
+    empty.appendChild(
+      createElement(
+        "p",
+        "empty-copy",
+        "설계안을 생성하면 여기에서 이름, 대상, 핵심 목적, 시작 인사와 규칙을 한눈에 볼 수 있습니다.",
+      ),
+    );
+    card.appendChild(empty);
+    return card;
+  }
+
+  const hero = createElement("div", "preview-hero");
+  hero.appendChild(createElement("span", "preview-overline", "CURRENT BOT"));
+  hero.appendChild(createElement("h3", "preview-title", state.botConfig.name));
+  hero.appendChild(createElement("p", "preview-copy", state.botConfig.tagline));
+
+  const meta = createElement("div", "preview-meta");
+  meta.append(
+    createElement("span", "meta-pill", getLanguageLabel(state.botConfig.language)),
+    createElement("span", "meta-pill", state.botConfig.targetAudience),
+  );
+
+  if (state.uploadedPdfMeta) {
+    meta.append(
+      createElement(
+        "span",
+        "meta-pill",
+        `PDF ${state.uploadedPdfMeta.pageCount}p / OCR ${state.uploadedPdfMeta.ocrPageCount}p`,
+      ),
+    );
+  }
+
+  hero.appendChild(meta);
+
+  const blocks = createElement("div", "preview-blocks");
+  blocks.append(
+    createInfoList("Role", [state.botConfig.role]),
+    createInfoList("Purpose", [state.botConfig.purpose]),
+    createInfoList(
+      "Must Do",
+      state.botConfig.mustDo.length ? state.botConfig.mustDo : ["기본 규칙 없음"],
+    ),
+  );
+
+  const greetingBox = createElement("div", "greeting-box");
+  greetingBox.appendChild(createElement("span", "greeting-label", "첫 인사"));
+  greetingBox.appendChild(createElement("p", "greeting-copy", state.botConfig.greeting));
+
+  card.append(hero, blocks, greetingBox);
+  return card;
+}
+
+function createMessageRow(message) {
+  const row = createElement("div", `message-row ${message.role}`);
+
+  if (message.role === "assistant") {
+    row.appendChild(createElement("div", "message-avatar", "AI"));
+  }
+
+  const bubble = createElement("div", "bubble", message.content);
+  row.appendChild(bubble);
+  return row;
+}
+
+function createTypingRow() {
+  const row = createElement("div", "message-row assistant");
+  row.appendChild(createElement("div", "message-avatar", "AI"));
+
+  const typing = createElement("div", "typing");
+  typing.append(createElement("span"), createElement("span"), createElement("span"));
+
+  row.appendChild(typing);
+  return row;
+}
+
+function createChatCard() {
+  const card = createSectionCard(
+    "04",
+    "테스트 대화",
+    "생성된 봇을 바로 써 보면서 말투와 규칙이 제대로 반영되는지 확인하세요. 참고 자료에 없는 내용은 추측하지 않아야 합니다.",
+  );
+
+  if (!state.botConfig) {
+    const empty = createElement("div", "empty-state");
+    empty.appendChild(createElement("strong", "empty-title", "테스트할 봇이 없습니다."));
+    empty.appendChild(
+      createElement(
+        "p",
+        "empty-copy",
+        "설계 생성이 끝나면 이 영역에서 실제 사용자처럼 질문을 보내고 응답을 검증할 수 있습니다.",
+      ),
+    );
+    card.appendChild(empty);
+    return card;
+  }
+
+  const headRow = createElement("div", "chat-head");
+  const left = createElement("div", "chat-head-copy");
+  left.append(
+    createElement("h3", "chat-title", state.botConfig.name),
+    createElement("p", "chat-subtitle", state.botConfig.tagline),
+  );
+
+  const actions = createElement("div", "action-row compact");
+  actions.append(
+    createButton({
+      label: "대화 내보내기",
+      className: "ghost-button",
+      onClick: exportConversation,
+      disabled: !state.messages.length || state.loadingChat,
+    }),
+    createButton({
+      label: "대화 초기화",
+      className: "ghost-button",
+      onClick: clearConversation,
+      disabled: state.loadingChat,
+    }),
+  );
+
+  headRow.append(left, actions);
+  card.appendChild(headRow);
+
+  const meta = createElement("div", "chat-meta");
+  meta.append(
+    createElement("span", "meta-pill", `언어 ${getLanguageLabel(state.botConfig.language)}`),
+    createElement("span", "meta-pill", `세션 ${shortSessionId()}`),
+  );
+
+  if (state.uploadedPdfMeta) {
+    meta.append(
+      createElement(
+        "span",
+        "meta-pill",
+        `참고 자료 ${state.uploadedPdfMeta.extractedCharCount.toLocaleString()}자`,
+      ),
+    );
+  }
+
+  card.appendChild(meta);
+
+  const shell = createElement("div", "chat-shell");
+  const log = createElement("div", "chat-log");
+  log.id = "chat-log";
+
+  if (!state.messages.length) {
+    const welcome = createElement("div", "welcome-panel");
+    welcome.appendChild(createElement("p", "welcome-label", "첫 인사"));
+    welcome.appendChild(createElement("h4", "welcome-title", state.botConfig.greeting));
+
+    const starterWrap = createElement("div", "starter-grid");
+    state.botConfig.starterQuestions.forEach((question) => {
+      starterWrap.appendChild(
+        createButton({
+          label: question,
+          className: "starter-button",
+          onClick: () => {
+            void sendMessage(question);
+          },
+          disabled: state.loadingChat,
+        }),
+      );
+    });
+
+    welcome.appendChild(starterWrap);
+    log.appendChild(welcome);
+  }
+
+  state.messages.forEach((message) => {
+    log.appendChild(createMessageRow(message));
+  });
+
+  if (state.loadingChat) {
+    log.appendChild(createTypingRow());
+  }
+
+  shell.appendChild(log);
+
+  const composer = document.createElement("form");
+  composer.className = "composer";
+
+  const input = document.createElement("input");
+  input.className = "composer-input";
+  input.type = "text";
+  input.placeholder = "테스트할 질문을 입력해 주세요.";
+  input.autocomplete = "off";
+  input.disabled = state.loadingChat;
+
+  const sendButton = createButton({
+    label: state.loadingChat ? "..." : "보내기",
+    className: "send-button",
+    type: "submit",
+    disabled: state.loadingChat,
+  });
+
+  composer.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = input.value.trim();
+
+    if (!value) {
+      input.setCustomValidity("질문을 먼저 입력해 주세요.");
+      input.reportValidity();
+      return;
+    }
+
+    input.setCustomValidity("");
+    void sendMessage(value);
+  });
+
+  composer.append(input, sendButton);
+  shell.appendChild(composer);
+  shell.appendChild(
+    createElement(
+      "p",
+      "section-note",
+      "테스트 대화와 설계안은 브라우저에 저장됩니다. 서버 로그는 기본적으로 꺼져 있고, 켜더라도 메타데이터만 남기도록 구성했습니다.",
+    ),
+  );
+
+  card.appendChild(shell);
+
+  queueMicrotask(() => {
+    const chatLog = document.getElementById("chat-log");
+    chatLog?.scrollTo({ top: chatLog.scrollHeight, behavior: "smooth" });
+  });
+
+  return card;
+}
+
+function render() {
+  app.replaceChildren();
+
+  const page = createElement("div", "page");
+  page.appendChild(createSidebar());
+
+  const main = createElement("main", "panel main-panel");
+  const workspace = createElement("div", "workspace-grid");
+  const leftColumn = createElement("div", "column-stack");
+  const rightColumn = createElement("div", "column-stack");
+
+  leftColumn.append(createMakerCard(), createConfigCard());
+  rightColumn.append(createSummaryCard(), createChatCard());
+
+  workspace.append(leftColumn, rightColumn);
+  main.appendChild(workspace);
   page.appendChild(main);
   app.appendChild(page);
 }

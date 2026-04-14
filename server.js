@@ -7,6 +7,7 @@ import {
   HttpError,
   getHealthPayload,
   processChatRequest,
+  processMakerRequest,
 } from "./lib/chat-service.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,12 +16,13 @@ const publicDir = path.join(__dirname, "public");
 
 await loadEnvFile(path.join(__dirname, ".env"));
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 3010);
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",
@@ -29,6 +31,7 @@ const MIME_TYPES = {
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
   ".ico": "image/x-icon",
+  ".wasm": "application/wasm",
   ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
@@ -49,6 +52,11 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (requestUrl.pathname === "/api/make-bot" && req.method === "POST") {
+      await handleMaker(req, res);
+      return;
+    }
+
     if (requestUrl.pathname === "/api/chat" && req.method === "POST") {
       await handleChat(req, res);
       return;
@@ -62,14 +70,35 @@ const server = createServer(async (req, res) => {
     await serveStatic(requestUrl.pathname, res);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "서버에서 알 수 없는 오류가 발생했습니다.";
+      error instanceof Error
+        ? error.message
+        : "서버에서 알 수 없는 오류가 발생했습니다.";
     sendJson(res, 500, { error: message });
   }
 });
 
 server.listen(PORT, () => {
-  console.log(`지형 탐험 도우미 서버가 http://localhost:${PORT} 에서 실행 중입니다.`);
+  console.log(
+    `챗봇 메이커 서버가 http://localhost:${PORT} 에서 실행 중입니다.`,
+  );
 });
+
+async function handleMaker(req, res) {
+  try {
+    const result = await processMakerRequest(await readJson(req), {
+      userAgent: req.headers["user-agent"] || "",
+      remoteAddress: req.socket.remoteAddress || "",
+    });
+    sendJson(res, 200, result);
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status : 500;
+    const message =
+      error instanceof Error
+        ? error.message
+        : "챗봇 설계안을 생성하지 못했습니다.";
+    sendJson(res, status, { error: message });
+  }
+}
 
 async function handleChat(req, res) {
   try {
@@ -81,7 +110,9 @@ async function handleChat(req, res) {
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
     const message =
-      error instanceof Error ? error.message : "챗봇 응답을 처리하지 못했습니다.";
+      error instanceof Error
+        ? error.message
+        : "챗봇 응답을 처리하지 못했습니다.";
     sendJson(res, status, { error: message });
   }
 }

@@ -1,11 +1,11 @@
 {
-  "name": "지형 탐험 도우미",
-  "short_name": "지형 탐험",
-  "description": "Kimi 2.5 기반 다국어 지형 학습 챗봇",
+  "name": "챗봇 메이커",
+  "short_name": "챗봇 메이커",
+  "description": "Moonshot 기반 커스텀 챗봇 설계 및 테스트 앱",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f5efe5",
-  "theme_color": "#2f7a54",
+  "background_color": "#f4efe8",
+  "theme_color": "#1f6b4f",
   "icons": [
     {
       "src": "/brand-mark.svg",
