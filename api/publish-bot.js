@@ -4,12 +4,14 @@ export async function POST(request) {
   try {
     const body = await request.json().catch(() => ({}));
     const url = new URL(request.url);
-    const protocol =
-      request.headers.get("x-forwarded-proto") || url.protocol.replace(":", "");
     const host =
       request.headers.get("x-forwarded-host") ||
       request.headers.get("host") ||
       url.host;
+    const isLocalHost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/i.test(host);
+    const protocol = isLocalHost
+      ? request.headers.get("x-forwarded-proto") || url.protocol.replace(":", "")
+      : "https";
     const result = await processPublishRequest(body, {
       userAgent: request.headers.get("user-agent") || "",
       remoteAddress:
