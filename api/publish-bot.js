@@ -4,13 +4,19 @@ export async function POST(request) {
   try {
     const body = await request.json().catch(() => ({}));
     const url = new URL(request.url);
+    const protocol =
+      request.headers.get("x-forwarded-proto") || url.protocol.replace(":", "");
+    const host =
+      request.headers.get("x-forwarded-host") ||
+      request.headers.get("host") ||
+      url.host;
     const result = await processPublishRequest(body, {
       userAgent: request.headers.get("user-agent") || "",
       remoteAddress:
         request.headers.get("x-forwarded-for") ||
         request.headers.get("x-real-ip") ||
         "",
-      baseUrl: url.origin,
+      baseUrl: `${protocol}://${host}`,
     });
 
     return Response.json(result);
