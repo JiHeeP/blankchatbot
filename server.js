@@ -141,7 +141,7 @@ async function handlePublish(req, res, requestUrl) {
     const result = await processPublishRequest(await readJson(req), {
       userAgent: req.headers["user-agent"] || "",
       remoteAddress: req.socket.remoteAddress || "",
-      baseUrl: requestUrl.origin,
+      baseUrl: getBaseUrl(req, requestUrl),
     });
     sendJson(res, 200, result);
   } catch (error) {
@@ -234,6 +234,22 @@ function resolveStaticPath(requestPath) {
   }
 
   return requestPath;
+}
+
+function getBaseUrl(req, requestUrl) {
+  const forwardedHost = req.headers["x-forwarded-host"];
+  const host =
+    (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost) ||
+    req.headers.host ||
+    requestUrl.host;
+  const hostText = String(host || "");
+  const isLocalHost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/i.test(hostText);
+
+  if (isLocalHost) {
+    return requestUrl.origin;
+  }
+
+  return `https://${hostText}`;
 }
 
 async function readJson(req) {
