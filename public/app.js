@@ -26,12 +26,15 @@ function loadInitialState() {
     sourceText: readText(persisted.sourceText, MAX_SOURCE_TEXT_LENGTH),
     uploadedPdfMeta: normalizeUploadedPdfMeta(persisted.uploadedPdfMeta),
     botConfig: persisted.botConfig ? normalizeBotConfig(persisted.botConfig) : null,
+    publishedBot: normalizePublishedBot(persisted.publishedBot),
     messages: sanitizeMessages(persisted.messages),
     loadingPdf: false,
     loadingMake: false,
     loadingChat: false,
+    loadingPublish: false,
     isDragActive: false,
     makeError: "",
+    publishError: "",
     lastSavedAt:
       typeof persisted.lastSavedAt === "string" ? persisted.lastSavedAt : null,
   };
@@ -55,6 +58,7 @@ function persistState() {
         sourceText: state.sourceText,
         uploadedPdfMeta: state.uploadedPdfMeta,
         botConfig: state.botConfig,
+        publishedBot: state.publishedBot,
         messages: state.messages,
         lastSavedAt: state.lastSavedAt,
       }),
@@ -82,6 +86,27 @@ function normalizeUploadedPdfMeta(value) {
     truncated: Boolean(value.truncated),
     extractionStatus: readText(value.extractionStatus, 80) || "완료",
     extractionError: readText(value.extractionError, 240),
+  };
+}
+
+function normalizePublishedBot(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const botId = readText(value.botId, 120);
+  const shareUrl = readText(value.shareUrl, 400);
+
+  if (!botId || !shareUrl) {
+    return null;
+  }
+
+  return {
+    botId,
+    name: readText(value.name, 120),
+    shareUrl,
+    publishedAt: readText(value.publishedAt, 80),
+    accessMode: readText(value.accessMode, 40) || "link-only",
   };
 }
 
@@ -191,6 +216,23 @@ function formatSavedAt() {
   }
 }
 
+function formatPublishedAt(value) {
+  if (!value) {
+    return "-";
+  }
+
+  try {
+    return new Intl.DateTimeFormat("ko-KR", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return "0B";
@@ -213,12 +255,15 @@ function resetWorkspace() {
     sourceText: "",
     uploadedPdfMeta: null,
     botConfig: null,
+    publishedBot: null,
     messages: [],
     loadingPdf: false,
     loadingMake: false,
     loadingChat: false,
+    loadingPublish: false,
     isDragActive: false,
     makeError: "",
+    publishError: "",
     lastSavedAt: new Date().toISOString(),
   });
   persistState();
@@ -343,11 +388,94 @@ function keepExtractedTextOnly() {
 }
 
 function canGenerateBot() {
-  if (state.loadingPdf || state.loadingMake || state.loadingChat) {
+  if (
+    state.loadingPdf ||
+    state.loadingMake ||
+    state.loadingChat ||
+    state.loadingPublish
+  ) {
     return false;
   }
 
   return Boolean(state.makerBrief.trim() || state.sourceText.trim());
+}
+
+function canPublishBot() {
+  if (
+    !state.botConfig ||
+    state.loadingPdf ||
+    state.loadingMake ||
+    state.loadingChat ||
+    state.loadingPublish
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+async function publishBot() {
+  if (!state.botConfig) {
+    return;
+  }
+
+  setState(
+    {
+      loadingPublish: true,
+      publishError: "",
+    },
+    { persist: false, updateSavedAt: false },
+  );
+
+  try {
+    const response = await fetch("/api/publish-bot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: state.sessionId,
+        botConfig: normalizeBotConfig(state.botConfig),
+        uploadedPdfMeta: state.uploadedPdfMeta,
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.error || "챗봇 링크를 발행하지 못했습니다.");
+    }
+
+    setState({
+      loadingPublish: false,
+      publishError: "",
+      publishedBot: normalizePublishedBot(data.publishedBot),
+    });
+  } catch (error) {
+    setState({
+      loadingPublish: false,
+      publishError:
+        error instanceof Error
+          ? error.message
+          : "챗봇 링크를 발행하지 못했습니다.",
+    });
+  }
+}
+
+async function copyPublishedLink() {
+  if (!state.publishedBot?.shareUrl) {
+    return;
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(state.publishedBot.shareUrl);
+      setState({ publishError: "" }, { persist: false, updateSavedAt: false });
+      return;
+    }
+  } catch {
+    // Fall through to the prompt fallback.
+  }
+
+  window.prompt("이 링크를 복사해 사용해 주세요.", state.publishedBot.shareUrl);
 }
 
 async function handlePdfSelection(file) {
@@ -450,6 +578,7 @@ async function generateBot() {
       messages: [],
       loadingMake: false,
       makeError: "",
+      publishError: "",
     });
   } catch (error) {
     setState({
@@ -683,7 +812,11 @@ function createSidebar() {
     label: "워크스페이스 초기화",
     className: "ghost-button full-width",
     onClick: resetWorkspace,
-    disabled: state.loadingPdf || state.loadingMake || state.loadingChat,
+    disabled:
+      state.loadingPdf ||
+      state.loadingMake ||
+      state.loadingChat ||
+      state.loadingPublish,
   });
 
   footer.appendChild(resetButton);
@@ -991,7 +1124,7 @@ function createMakerCard() {
       label: "입력 비우기",
       className: "ghost-button",
       onClick: clearInputs,
-      disabled: state.loadingPdf || state.loadingMake,
+      disabled: state.loadingPdf || state.loadingMake || state.loadingPublish,
     }),
   );
   layout.appendChild(actions);
@@ -1213,7 +1346,11 @@ function createConfigCard() {
       label: "수정 적용",
       className: "primary-button",
       onClick: applyBotConfigEdits,
-      disabled: state.loadingPdf || state.loadingMake || state.loadingChat,
+      disabled:
+        state.loadingPdf ||
+        state.loadingMake ||
+        state.loadingChat ||
+        state.loadingPublish,
     }),
     createButton({
       label: "JSON 내보내기",
@@ -1464,6 +1601,102 @@ function createChatCard() {
   return card;
 }
 
+function createPublishCard() {
+  const card = createSectionCard(
+    "05",
+    "링크 발행",
+    "설계를 마친 챗봇을 전용 링크로 발행합니다. 링크를 받은 사람은 메이커 화면이 아니라 공개 챗봇 화면만 보게 됩니다.",
+  );
+
+  if (!state.botConfig) {
+    const empty = createElement("div", "empty-state");
+    empty.appendChild(createElement("strong", "empty-title", "발행할 챗봇이 아직 없습니다."));
+    empty.appendChild(
+      createElement(
+        "p",
+        "empty-copy",
+        "설계안을 만든 뒤 발행하기를 누르면 공유 전용 링크가 만들어집니다.",
+      ),
+    );
+    card.appendChild(empty);
+    return card;
+  }
+
+  const wrap = createElement("div", "publish-card");
+
+  wrap.appendChild(
+    createElement(
+      "p",
+      "section-note",
+      "다시 발행하면 이전 링크를 덮어쓰지 않고 새 링크가 만들어집니다. 지금 카드에는 마지막으로 발행한 링크만 보여줍니다.",
+    ),
+  );
+
+  if (state.publishError) {
+    wrap.appendChild(createElement("div", "error-banner", state.publishError));
+  }
+
+  if (state.publishedBot) {
+    const linkBox = createElement("div", "publish-link-box");
+    linkBox.append(
+      createElement("span", "publish-link-label", "마지막 발행 링크"),
+      createElement("p", "publish-link-url", state.publishedBot.shareUrl),
+    );
+
+    const meta = createElement("div", "publish-meta");
+    meta.append(
+      createElement(
+        "span",
+        "meta-pill",
+        `발행 ${formatPublishedAt(state.publishedBot.publishedAt)}`,
+      ),
+      createElement(
+        "span",
+        "meta-pill",
+        state.publishedBot.accessMode === "link-only"
+          ? "링크 있는 사람만"
+          : state.publishedBot.accessMode,
+      ),
+    );
+
+    linkBox.appendChild(meta);
+    wrap.appendChild(linkBox);
+  }
+
+  const actions = createElement("div", "action-row");
+  actions.append(
+    createButton({
+      label: state.loadingPublish ? "발행 중.." : "발행하기",
+      className: "primary-button",
+      onClick: publishBot,
+      disabled: !canPublishBot(),
+    }),
+  );
+
+  if (state.publishedBot?.shareUrl) {
+    actions.append(
+      createButton({
+        label: "링크 복사",
+        className: "ghost-button",
+        onClick: () => {
+          void copyPublishedLink();
+        },
+      }),
+      createButton({
+        label: "챗봇 열기",
+        className: "ghost-button",
+        onClick: () => {
+          window.open(state.publishedBot.shareUrl, "_blank", "noopener,noreferrer");
+        },
+      }),
+    );
+  }
+
+  wrap.appendChild(actions);
+  card.appendChild(wrap);
+  return card;
+}
+
 function render() {
   app.replaceChildren();
 
@@ -1476,7 +1709,7 @@ function render() {
   const rightColumn = createElement("div", "column-stack");
 
   leftColumn.append(createMakerCard(), createConfigCard());
-  rightColumn.append(createSummaryCard(), createChatCard());
+  rightColumn.append(createSummaryCard(), createChatCard(), createPublishCard());
 
   workspace.append(leftColumn, rightColumn);
   main.appendChild(workspace);

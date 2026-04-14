@@ -5,15 +5,19 @@ import { fileURLToPath } from "node:url";
 
 import {
   HttpError,
+  getPublishedBotResponse,
   getHealthPayload,
   processChatRequest,
   processMakerRequest,
+  processPublicChatRequest,
+  processPublishRequest,
 } from "./lib/chat-service.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "public");
 
+await loadEnvFile(path.join(__dirname, ".env.local"));
 await loadEnvFile(path.join(__dirname, ".env"));
 
 const PORT = Number(process.env.PORT || 3010);
@@ -59,6 +63,21 @@ const server = createServer(async (req, res) => {
 
     if (requestUrl.pathname === "/api/chat" && req.method === "POST") {
       await handleChat(req, res);
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/publish-bot" && req.method === "POST") {
+      await handlePublish(req, res, requestUrl);
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/public-chat" && req.method === "POST") {
+      await handlePublicChat(req, res);
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/public-bot" && req.method === "GET") {
+      await handlePublicBot(res, requestUrl);
       return;
     }
 
@@ -117,8 +136,60 @@ async function handleChat(req, res) {
   }
 }
 
+async function handlePublish(req, res, requestUrl) {
+  try {
+    const result = await processPublishRequest(await readJson(req), {
+      userAgent: req.headers["user-agent"] || "",
+      remoteAddress: req.socket.remoteAddress || "",
+      baseUrl: requestUrl.origin,
+    });
+    sendJson(res, 200, result);
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status : 500;
+    const message =
+      error instanceof Error
+        ? error.message
+        : "챗봇 링크를 발행하지 못했습니다.";
+    sendJson(res, status, { error: message });
+  }
+}
+
+async function handlePublicChat(req, res) {
+  try {
+    const result = await processPublicChatRequest(await readJson(req), {
+      userAgent: req.headers["user-agent"] || "",
+      remoteAddress: req.socket.remoteAddress || "",
+    });
+    sendJson(res, 200, result);
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status : 500;
+    const message =
+      error instanceof Error
+        ? error.message
+        : "공개 챗봇 응답을 처리하지 못했습니다.";
+    sendJson(res, status, { error: message });
+  }
+}
+
+async function handlePublicBot(res, requestUrl) {
+  try {
+    const botId = requestUrl.searchParams.get("botId") || "";
+    const result = await getPublishedBotResponse(botId);
+    sendJson(res, 200, result, {
+      "X-Robots-Tag": "noindex, nofollow, noarchive",
+    });
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status : 500;
+    const message =
+      error instanceof Error
+        ? error.message
+        : "공개 챗봇 정보를 불러오지 못했습니다.";
+    sendJson(res, status, { error: message });
+  }
+}
+
 async function serveStatic(requestPath, res) {
-  const normalizedPath = requestPath === "/" ? "/index.html" : requestPath;
+  const normalizedPath = resolveStaticPath(requestPath);
   const safePath = path
     .normalize(normalizedPath)
     .replace(/^(\.\.[/\\])+/, "")
@@ -137,8 +208,32 @@ async function serveStatic(requestPath, res) {
   const mimeType = MIME_TYPES[extension] || "application/octet-stream";
   const file = await readFile(filePath);
 
-  res.writeHead(200, { "Content-Type": mimeType });
+  const extraHeaders =
+    normalizedPath === "/bot.html"
+      ? { "X-Robots-Tag": "noindex, nofollow, noarchive" }
+      : {};
+
+  res.writeHead(200, {
+    "Content-Type": mimeType,
+    ...extraHeaders,
+  });
   res.end(file);
+}
+
+function resolveStaticPath(requestPath) {
+  if (requestPath === "/") {
+    return "/index.html";
+  }
+
+  if (requestPath === "/bot" || requestPath === "/bot/") {
+    return "/bot.html";
+  }
+
+  if (requestPath.startsWith("/bot/")) {
+    return "/bot.html";
+  }
+
+  return requestPath;
 }
 
 async function readJson(req) {
@@ -152,9 +247,10 @@ async function readJson(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-function sendJson(res, statusCode, payload) {
+function sendJson(res, statusCode, payload, extraHeaders = {}) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
+    ...extraHeaders,
   });
   res.end(JSON.stringify(payload));
 }
