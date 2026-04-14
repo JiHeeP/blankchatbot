@@ -1,0 +1,17 @@
+{
+  "name": "지형 탐험 도우미",
+  "short_name": "지형 탐험",
+  "description": "Kimi 2.5 기반 다국어 지형 학습 챗봇",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5efe5",
+  "theme_color": "#2f7a54",
+  "icons": [
+    {
+      "src": "/brand-mark.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

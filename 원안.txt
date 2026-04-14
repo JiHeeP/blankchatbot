@@ -1,0 +1,389 @@
+import React, { useState, useRef, useEffect } from "react";
+
+const LANGUAGES = [
+  { code: "ko", label: "한국어", flag: "🇰🇷" },
+  { code: "zh", label: "中文", flag: "🇨🇳" },
+  { code: "ru", label: "Русский", flag: "🇷🇺" },
+];
+
+const TERRAINS = {
+  ko: [
+    { code: "mountain", label: "산지", emoji: "🏔️" },
+    { code: "river", label: "하천", emoji: "🏞️" },
+    { code: "coast", label: "해안", emoji: "🌊" },
+  ],
+  zh: [
+    { code: "mountain", label: "山地", emoji: "🏔️" },
+    { code: "river", label: "河流", emoji: "🏞️" },
+    { code: "coast", label: "海岸", emoji: "🌊" },
+  ],
+  ru: [
+    { code: "mountain", label: "Горы", emoji: "🏔️" },
+    { code: "river", label: "Реки", emoji: "🏞️" },
+    { code: "coast", label: "Побережье", emoji: "🌊" },
+  ],
+};
+
+const ENTRY_Q = {
+  mountain: { ko: "산지의 모습은 어때?", zh: "山地的样子怎么样？", ru: "Как выглядят горы?" },
+  river: { ko: "하천의 모습은 어때?", zh: "河流的样子怎么样？", ru: "Как выглядит река?" },
+  coast: { ko: "해안의 모습은 어때?", zh: "海岸的样子怎么样？", ru: "Как выглядит побережье?" },
+};
+
+const LABELS = {
+  ko: { pick: "우리 모둠의 지형을 골라 주세요", start: "여기를 눌러 시작!" },
+  zh: { pick: "请选择你们小组的地形", start: "点击这里开始！" },
+  ru: { pick: "Выберите рельеф вашей группы", start: "Нажмите, чтобы начать!" },
+};
+
+function getSystemPrompt(langCode, terrainCode) {
+  const bilingualRule =
+    langCode === "ko"
+      ? "한국어로만 답하세요."
+      : langCode === "zh"
+      ? `반드시 아래 형식으로 답하세요:\n\n[中文]\n(중국어 답변)\n\n[한국어]\n(같은 내용 한국어 답변)\n\n두 언어를 항상 함께 보여주세요.`
+      : `반드시 아래 형식으로 답하세요:\n\n[Русский]\n(러시아어 답변)\n\n[한국어]\n(같은 내용 한국어 답변)\n\n두 언어를 항상 함께 보여주세요.`;
+
+  const offTopicMsg =
+    langCode === "ko" ? "오늘 배우는 것만 물어봐! 🌍"
+    : langCode === "zh" ? "请只提问今天的学习内容！🌍\n오늘 배우는 것만 물어봐! 🌍"
+    : "Задавайте вопросы только по теме урока! 🌍\n오늘 배우는 것만 물어봐! 🌍";
+
+  const terrainData = {
+    mountain: `### 🏔️ 산지
+
+**모습과 교통 (학생이 "모습은 어때?"라고 물으면 이것만 답변):**
+땅이 높고 험해서 길이 꼬불꼬불하고, 터널을 뚫어서 다녀요 🚗⛰️
+
+**자원 목록 (학생이 "무엇이 있어?" 등 자원을 물으면 이것만 나열):**
+1. 나무와 버섯, 산나물
+2. 시원한 공기
+3. 높은 산과 멋진 풍경, 눈
+4. 기울어진 땅
+5. 바람
+
+**자원별 하는 일 (학생이 "~(으)로는 무엇을 해?"라고 물으면 해당 자원만 답변):**
+1. 나무와 버섯, 산나물 → 강원도 산골 마을인 태백, 정선에서는 나무를 베어서 팔고, 지리산이나 오대산처럼 깊은 산에서는 버섯이나 산나물을 따서 먹거나 팔아요 🪵🍄
+2. 시원한 공기 → 강원도에 있는 높은 고개인 대관령은 높은 산이라 여름에도 시원해서, 배추랑 감자를 키워요 🥬
+3. 높은 산과 멋진 풍경, 눈 → 강원도에 있는 높고 멋진 산인 설악산에는 등산하러 와요. 전북에 있는 산골 마을인 무주에는 눈이 많이 와서 스키장이 있어요. 놀러 와요! (관광업) 🥾⛷️
+4. 기울어진 땅 → 경남 바닷가 근처 산비탈에 있는 다랑이마을에서는 평평한 땅이 없어서, 비탈에 층층이 논을 만들어 농사를 지어요 🌾
+5. 바람 → 강원도 태백에 있는 매봉산에서는 바람이 세게 불어서, 바람으로 전기를 만들어요 💨`,
+
+    river: `### 🏞️ 하천
+
+**모습과 교통 (학생이 "모습은 어때?"라고 물으면 이것만 답변):**
+평야가 있어서 땅이 넓고 평평해서 도로가 곧게 뻗어 있고, 큰 도로와 철도가 있어요 🛣️🚆
+
+**자원 목록 (학생이 "무엇이 있어?" 등 자원을 물으면 이것만 나열):**
+1. 물
+2. 물살이 센 강
+3. 잔잔한 강
+
+**자원별 하는 일 (학생이 "~(으)로는 무엇을 해?"라고 물으면 해당 자원만 답변):**
+1. 물 → 김제 평야나 나주 평야처럼 넓은 땅에서는 물이 있어서 벼농사를 지어요 🌾 그리고 충주댐이나 소양강댐을 만들어서 물을 저장해 두거나, 그 물의 힘을 전기로 바꾸기도 해요 ⚡💧
+2. 물살이 센 강 → 강원도 영월에 있는 굽이굽이 흐르는 강인 동강에서는 물살이 세서 고무보트를 타요 🛶
+3. 잔잔한 강 → 강원도 춘천에 있는 남이섬 근처에서는 강이 잔잔해서 물놀이를 해요. 놀러 와요! (관광업) 🏖️`,
+
+    coast: `### 🌊 해안
+
+**모습과 교통 (학생이 "모습은 어때?"라고 물으면 이것만 답변):**
+바다가 막고 있거나 섬이 많아서 배(여객선)를 타거나, 다리를 건너거나, 항구를 통해서 다녀요 🚢🌉
+
+**자원 목록 (학생이 "무엇이 있어?" 등 자원을 물으면 이것만 나열):**
+1. 물고기
+2. 갯벌
+3. 잔잔한 바다
+4. 햇빛과 바닷물
+5. 깊은 바다
+6. 멋진 풍경과 모래사장
+
+**자원별 하는 일 (학생이 "~(으)로는 무엇을 해?"라고 물으면 해당 자원만 답변):**
+1. 물고기 → 부산에 있는 큰 수산시장인 자갈치시장, 강원도에 있는 바닷가 마을인 속초에서는 바다에 물고기가 많아서 물고기를 잡아요 🐟
+2. 갯벌 → 충남에 있는 서천, 전남에 있는 벌교에서는 바닷물이 빠지면 나타나는 뻘인 갯벌에서 조개랑 굴을 캐요 🦪
+3. 잔잔한 바다 → 전남에 있는 섬인 완도, 전남에 있는 해남에서는 바다가 잔잔해서 김이랑 전복이랑 미역을 길러요 (양식장) 🌿
+4. 햇빛과 바닷물 → 전남에 있는 섬인 신안에서는 햇빛과 바닷물을 써서 소금을 만들어요 🧂
+5. 깊은 바다 → 부산에 있는 큰 항구인 부산항, 인천에 있는 큰 항구인 인천항에서는 바다가 깊어서 큰 배가 들어와서 다른 나라랑 물건을 사고팔아요 🚢
+6. 멋진 풍경·모래사장 → 부산에 있는 넓은 모래사장인 해운대, 아름다운 섬인 제주도에는 구경하러 와요, 놀러 와요! (관광업) 🏝️`,
+  };
+
+  return `당신은 초등학교 5학년 "지형 탐험 도우미"입니다.
+
+## 말투 (매우 중요)
+- 한국어 초등학교 2학년이 이해할 수 있는 쉬운 말만 쓰세요.
+- 어려운 단어는 반드시 쉬운 말로 풀어서 같이 쓰세요.
+- 장소 이름을 처음 쓸 때는 "어디에 있는 어떤 곳인 이름" 형태로 쓰세요.
+
+## 답변 언어
+${bilingualRule}
+
+## 필수 용어 규칙 (절대 누락 금지)
+- 사람들이 "놀러 와요", "등산하러 와요", "구경하러 와요"처럼 즐기러 오는 내용을 설명할 때는, 문장 끝에 반드시 "(관광업)"이라는 단어를 명시하세요. (예: 놀러 와요! (관광업) 🏖️) AI 임의로 이 단어를 생략하면 안 됩니다.
+
+## 답변 흐름 (매우 중요 — 이 3단계 순서를 반드시 지키세요)
+
+### 1단계: 학생이 처음 지형의 "~모습은 어때?"라고 물으면
+- 해당 지형의 **[모습과 교통]** 특징을 짧게 대답하세요.
+- 답변 후 반드시 이렇게 유도하세요:
+  → "그럼 이런 곳에는 어떤 자원이 있는지 물어볼래? 🤔"
+
+### 2단계: 학생이 "~에는 무엇이 있어?" 등 자원을 물으면
+- **[자원 목록]**만 나열하세요. 사람들이 하는 일은 절대 말하지 마세요.
+- 자원 목록을 나열할 때는 반드시 1, 2, 3... 번호를 붙여서 알려주세요.
+- 나열 후 반드시 자원 중 하나를 골라서 이렇게 유도하세요:
+  → "그러면, [자원 이름](으)로는 무엇을 하는지 물어봐! 🤔"
+
+### 3단계: 학생이 "~(으)로는 무엇을 해?"라고 물으면
+- 해당 자원의 하는 일만 답하세요. 다른 자원은 말하지 마세요.
+- "~가 있어서, ~를 해요" 또는 "~를 써서 ~를 해요" 형태로 답하세요.
+- 답변 후 아직 물어보지 않은 자원 중 하나를 골라서 이렇게 유도하세요:
+  → "다음으로, [다른 자원](으)로는 무엇을 하는지 물어봐! 🤔"
+- 모든 자원을 다 물어봤으면: "대단해! 다 알아냈어! 👏 더 궁금한 게 있으면 물어봐!"
+
+## 답변 범위
+- ✅ 한국·세계의 지형, 자원, 사람들이 하는 일, 교통
+- ❌ 지형·자연과 관련 없는 질문 → "${offTopicMsg}"
+
+## 절대 하지 않는 것
+- "지형이 생활에 영향을 미친다", "사람들은 지형의 자원을 이용하여 생활한다" 같은 일반화를 절대 말하지 마세요.
+- 여러 자원을 묶어 패턴이나 규칙을 말하지 마세요.
+- 학생이 일반화를 물어도 "그건 네가 직접 생각해 봐! 🤔"로 되돌리세요.
+
+## 답변 길이
+- 2~3문장으로 짧게. 이모지 적절히 사용.
+
+## 데이터
+${terrainData[terrainCode] || terrainData.mountain}
+
+세계 지형 질문은 아는 범위에서 같은 규칙(쉬운 말, 짧게, 일반화 금지, 자원 하나씩)으로 답하세요.`;
+}
+
+function TypingDots() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "12px 16px" }}>
+      {[0, 1, 2].map((i) => (
+        <div key={i} style={{ width: 8, height: 8, borderRadius: "50%", background: "#94a3b8", animation: `dot 1.2s ease-in-out ${i * 0.15}s infinite` }} />
+      ))}
+    </div>
+  );
+}
+
+function Bubble({ role, content }) {
+  const isUser = role === "user";
+  return (
+    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10, animation: "fadeUp 0.25s ease" }}>
+      {!isUser && (
+        <div style={{ width: 34, height: 34, borderRadius: "50%", background: "linear-gradient(135deg,#2d6a4f,#40916c)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0, marginRight: 8, marginTop: 4, boxShadow: "0 2px 8px rgba(45,106,79,0.25)" }}>🌍</div>
+      )}
+      <div style={{ maxWidth: "80%", padding: "10px 14px", borderRadius: isUser ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: isUser ? "linear-gradient(135deg,#2d6a4f,#40916c)" : "var(--bb)", color: isUser ? "#fff" : "var(--tx)", fontSize: 14.5, lineHeight: 1.7, wordBreak: "break-word", whiteSpace: "pre-wrap", boxShadow: isUser ? "0 2px 10px rgba(45,106,79,0.2)" : "0 1px 4px rgba(0,0,0,0.05)" }}>{content}</div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [lang, setLang] = useState(null);
+  const [terrain, setTerrain] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [started, setStarted] = useState(false);
+  const endRef = useRef(null);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
+
+  const send = async (text) => {
+    if (!text.trim() || loading) return;
+    setStarted(true);
+    const userMsg = { role: "user", content: text.trim() };
+    const next = [...messages, userMsg];
+    setMessages(next);
+    setInput("");
+    setLoading(true);
+
+    // Gemini API 연동 설정
+    const apiKey = ""; // 런타임에서 자동으로 주입됩니다.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    
+    // Gemini 메시지 포맷으로 변환
+    const geminiContents = next.map(m => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }]
+    }));
+
+    const payload = {
+      contents: geminiContents,
+      systemInstruction: {
+        parts: [{ text: getSystemPrompt(lang, terrain) }]
+      }
+    };
+
+    // 지수 백오프 기반 재시도 로직
+    const delays = [1000, 2000, 4000, 8000, 16000];
+    let attempt = 0;
+    let successText = "";
+
+    while (attempt < delays.length) {
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) throw new Error("API call failed");
+
+        const data = await res.json();
+        successText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        
+        if (successText) {
+          setMessages((p) => [...p, { role: "assistant", content: successText }]);
+          break; // 성공 시 루프 종료
+        } else {
+          throw new Error("No content received");
+        }
+      } catch (error) {
+        if (attempt === delays.length - 1) {
+          // 모든 재시도 실패 시
+          setMessages((p) => [...p, { role: "assistant", content: "인터넷을 확인하거나 다시 질문해 줘! 🔌" }]);
+        } else {
+          // 실패 시 대기 후 재시도
+          await new Promise(r => setTimeout(r, delays[attempt]));
+          attempt++;
+        }
+      }
+    }
+    
+    setLoading(false);
+  };
+
+  const reset = () => { setLang(null); setTerrain(null); setMessages([]); setStarted(false); };
+
+  const dk = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme:dark)").matches;
+  const vars = { "--bg": dk ? "#0f1a14" : "#f7faf8", "--bb": dk ? "#1e3a2a" : "#f0fdf4", "--tx": dk ? "#d4e7dc" : "#1e293b", "--tx2": dk ? "#8aac9a" : "#64748b", "--bd": dk ? "#2a4a3a" : "#d1e7dd", "--inp": dk ? "#162920" : "#fff" };
+  const css = `@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}@keyframes dot{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-8px);opacity:1}}*{box-sizing:border-box;margin:0;padding:0}`;
+
+  // --- Language ---
+  if (!lang) {
+    return (
+      <div style={{ ...vars, height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "var(--bg)", fontFamily: "'Pretendard','Noto Sans KR',sans-serif", gap: 32 }}>
+        <style>{css}</style>
+        <div style={{ textAlign: "center", animation: "fadeUp 0.5s ease" }}>
+          <div style={{ fontSize: 56, marginBottom: 16, animation: "float 3s ease-in-out infinite" }}>🗺️</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "var(--tx)", marginBottom: 8 }}>지형 탐험 도우미</div>
+          <div style={{ fontSize: 14, color: "var(--tx2)", lineHeight: 1.6 }}>언어를 선택하세요<br />选择语言 · Выберите язык</div>
+        </div>
+        <div style={{ display: "flex", gap: 12, animation: "fadeUp 0.6s ease" }}>
+          {LANGUAGES.map((l) => (
+            <button key={l.code} onClick={() => setLang(l.code)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: "20px 28px", border: "2px solid var(--bd)", borderRadius: 16, background: "var(--inp)", cursor: "pointer", transition: "all 0.2s" }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#2d6a4f"; e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(45,106,79,0.15)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--bd)"; e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
+            >
+              <span style={{ fontSize: 32 }}>{l.flag}</span>
+              <span style={{ fontSize: 15, fontWeight: 600, color: "var(--tx)" }}>{l.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // --- Terrain ---
+  if (!terrain) {
+    const terrainList = TERRAINS[lang] || TERRAINS.ko;
+    const pickLabel = (LABELS[lang] || LABELS.ko).pick;
+    return (
+      <div style={{ ...vars, height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "var(--bg)", fontFamily: "'Pretendard','Noto Sans KR',sans-serif", gap: 32 }}>
+        <style>{css}</style>
+        <div style={{ textAlign: "center", animation: "fadeUp 0.5s ease" }}>
+          <div style={{ fontSize: 56, marginBottom: 16, animation: "float 3s ease-in-out infinite" }}>🗺️</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--tx)", marginBottom: 6 }}>{pickLabel}</div>
+        </div>
+        <div style={{ display: "flex", gap: 12, animation: "fadeUp 0.6s ease" }}>
+          {terrainList.map((t) => (
+            <button key={t.code} onClick={() => setTerrain(t.code)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: "20px 28px", border: "2px solid var(--bd)", borderRadius: 16, background: "var(--inp)", cursor: "pointer", transition: "all 0.2s" }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#2d6a4f"; e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(45,106,79,0.15)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--bd)"; e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
+            >
+              <span style={{ fontSize: 36 }}>{t.emoji}</span>
+              <span style={{ fontSize: 16, fontWeight: 600, color: "var(--tx)" }}>{t.label}</span>
+            </button>
+          ))}
+        </div>
+        <button onClick={() => setLang(null)} style={{ fontSize: 13, color: "var(--tx2)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+          ← {lang === "ko" ? "언어 다시 선택" : lang === "zh" ? "重新选择语言" : "Сменить язык"}
+        </button>
+      </div>
+    );
+  }
+
+  // --- Chat ---
+  const terrainObj = (TERRAINS[lang] || TERRAINS.ko).find((t) => t.code === terrain);
+  const langObj = LANGUAGES.find((l) => l.code === lang);
+  const entryQ = ENTRY_Q[terrain]?.[lang] || ENTRY_Q[terrain]?.ko;
+  const placeholder = lang === "ko" ? "궁금한 것을 물어봐!" : lang === "zh" ? "请输入问题..." : "Задайте вопрос...";
+  const startLabel = (LABELS[lang] || LABELS.ko).start;
+
+  return (
+    <div style={{ ...vars, height: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)", fontFamily: "'Pretendard','Noto Sans KR',sans-serif", overflow: "hidden" }}>
+      <style>{css}</style>
+
+      {/* Header */}
+      <div style={{ background: "linear-gradient(135deg,#2d6a4f,#1b4332)", padding: "14px 16px", color: "#fff", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 24 }}>{terrainObj?.emoji}</span>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>{terrainObj?.label} {lang === "ko" ? "탐험" : lang === "zh" ? "探索" : "исследование"}</div>
+            <div style={{ fontSize: 11, opacity: 0.8, marginTop: 1 }}>{langObj?.flag} {langObj?.label}</div>
+          </div>
+        </div>
+        <button onClick={reset} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", color: "#fff", fontSize: 12, cursor: "pointer" }}>
+          {lang === "ko" ? "처음으로" : lang === "zh" ? "重新开始" : "Сначала"}
+        </button>
+      </div>
+
+      {/* Chat area */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px 6px" }}>
+        {/* Entry button */}
+        {!started && (
+          <div style={{ animation: "fadeUp 0.4s ease", textAlign: "center", paddingTop: 32 }}>
+            <div style={{ fontSize: 48, marginBottom: 16, animation: "float 3s ease-in-out infinite" }}>{terrainObj?.emoji}</div>
+            <button
+              onClick={() => send(entryQ)}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 10,
+                padding: "14px 24px", border: "2px solid #2d6a4f", borderRadius: 16,
+                background: "linear-gradient(135deg,#2d6a4f,#40916c)", color: "#fff",
+                fontSize: 16, fontWeight: 600, cursor: "pointer", transition: "all 0.2s",
+                boxShadow: "0 4px 16px rgba(45,106,79,0.3)",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 6px 24px rgba(45,106,79,0.4)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(45,106,79,0.3)"; }}
+            >
+              <span>{entryQ}</span>
+            </button>
+            <div style={{ fontSize: 13, color: "var(--tx2)", marginTop: 12 }}>{startLabel}</div>
+          </div>
+        )}
+
+        {messages.map((m, i) => <Bubble key={i} role={m.role} content={m.content} />)}
+        {loading && <TypingDots />}
+        <div ref={endRef} />
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: "10px 14px 14px", borderTop: "1px solid var(--bd)", background: "var(--bg)", flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={input} onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
+            placeholder={placeholder} disabled={loading}
+            style={{ flex: 1, padding: "11px 14px", border: "1.5px solid var(--bd)", borderRadius: 12, fontSize: 14.5, background: "var(--inp)", color: "var(--tx)", outline: "none", transition: "border-color 0.2s" }}
+            onFocus={(e) => (e.target.style.borderColor = "#2d6a4f")}
+            onBlur={(e) => (e.target.style.borderColor = "var(--bd)")}
+          />
+          <button onClick={() => send(input)} disabled={loading || !input.trim()}
+            style={{ width: 42, height: 42, borderRadius: 12, border: "none", background: loading || !input.trim() ? "#94a3b8" : "linear-gradient(135deg,#2d6a4f,#40916c)", color: "#fff", fontSize: 18, cursor: loading || !input.trim() ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.2s" }}
+          >↑</button>
+        </div>
+      </div>
+    </div>
+  );
+}
