@@ -50,6 +50,7 @@ DEFAULT_WINDOW = {
     "보조색": "#cbd5e1",
     "강조색": "#fbbf24",
     "투명도": "1",
+    "방식": "맨아래",
 }
 
 SAMPLE_CONFIG = """# ===============================================
@@ -99,6 +100,8 @@ SAMPLE_CONFIG = """# ===============================================
 #       또는 숫자 두 개로 직접 지정 (예: 1200,80)
 # 높이: 자동 또는 숫자
 # 모니터: 1 = 주 모니터, 2 = 두 번째 모니터
+# 방식: 맨아래 = 항상 맨 아래 창으로 유지 (기본, 안정적)
+#       바탕화면 = 바탕화면 창 안에 붙이기 (윈도우 버전에 따라 안 될 수 있음)
 위치 = 오른쪽 위
 너비 = 560
 높이 = 자동
@@ -109,6 +112,7 @@ SAMPLE_CONFIG = """# ===============================================
 보조색 = #cbd5e1
 강조색 = #fbbf24
 투명도 = 1
+방식 = 맨아래
 """
 
 
@@ -297,6 +301,7 @@ if IS_WINDOWS:
     user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
     user32.GetAncestor.restype = wintypes.HWND
     user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsIconic.argtypes = [wintypes.HWND]
     if ctypes.sizeof(ctypes.c_void_p) == 8:
         _GetWindowLong = user32.GetWindowLongPtrW
         _SetWindowLong = user32.SetWindowLongPtrW
@@ -318,6 +323,8 @@ if IS_WINDOWS:
     SW_SHOWNOACTIVATE = 4
     GA_ROOT = 2
     GWL_STYLE = -16
+    GWL_EXSTYLE = -20
+    WS_EX_NOACTIVATE = 0x08000000
     WS_CHILD = 0x40000000
     WS_POPUP = 0x80000000
 
@@ -386,13 +393,21 @@ if IS_WINDOWS:
 
 
 class DesktopPin:
-    """Tk 창을 바탕화면 창의 자식으로 붙여서 '바탕화면 위, 다른 창 아래'에 둔다."""
+    """알림판 창을 '다른 창 아래, 바탕화면 위'에 둔다.
+
+    방식 두 가지:
+    - "bottom"  : 보통 창을 항상 z순서 맨 아래로 유지하고, 바탕화면 보기(Win+D)로
+                  최소화되면 곧바로 되살린다. 윈도우 버전과 무관하게 동작. (기본)
+    - "desktop" : 바탕화면 아이콘을 담은 창(Progman/WorkerW)의 자식으로 붙인다.
+                  버전에 따라 창이 그려지지 않는 경우가 있어 선택 사항으로 둔다.
+    """
 
     def __init__(self, root):
         self.root = root
         self.hwnd = None
         self.host = None
         self.mode = "window"  # "desktop" | "bottom" | "window"
+        self.restore_count = 0
 
     def _resolve_hwnd(self):
         self.root.update_idletasks()
@@ -409,42 +424,51 @@ class DesktopPin:
             style = (style & ~WS_CHILD) | WS_POPUP
         _SetWindowLong(self.hwnd, GWL_STYLE, style)
 
-    def attach(self, x, y, w, h):
+    def attach(self, x, y, w, h, prefer="맨아래"):
         if not IS_WINDOWS:
             return "window"
         if self.hwnd is None:
             self._resolve_hwnd()
-        host = find_desktop_host()
-        log("붙이기 시도: 창=%s 바탕화면창=%s(%s)" % (
-            self.hwnd, host, _class_name(host) if host else "-"))
-        if host:
-            if user32.GetParent(self.hwnd) != host:
-                self._set_child_style(True)
-                user32.SetParent(self.hwnd, host)
-            self.host = host
-            self.mode = "desktop"
-            self.place(x, y, w, h)
-            log("바탕화면 모드로 붙임 (%d,%d %dx%d) 표시=%s" % (
-                x, y, w, h, bool(user32.IsWindowVisible(self.hwnd))))
-        else:
-            self._fallback_bottom(x, y, w, h)
+        if "바탕" in str(prefer):
+            host = find_desktop_host()
+            log("바탕화면 붙이기 시도: 창=%s 바탕화면창=%s(%s)" % (
+                self.hwnd, host, _class_name(host) if host else "-"))
+            if host:
+                if user32.GetParent(self.hwnd) != host:
+                    self._set_child_style(True)
+                    user32.SetParent(self.hwnd, host)
+                self.host = host
+                self.mode = "desktop"
+                self.place(x, y, w, h)
+                log("바탕화면 모드로 붙임 (%d,%d %dx%d) 표시=%s" % (
+                    x, y, w, h, bool(user32.IsWindowVisible(self.hwnd))))
+                return self.mode
+        self._bottom(x, y, w, h)
         return self.mode
 
-    def _fallback_bottom(self, x, y, w, h):
-        """바탕화면 창에 못 붙이면 '항상 맨 아래 보통 창'으로 동작."""
+    def _bottom(self, x, y, w, h):
+        """항상 맨 아래 보통 창 모드."""
         if self.host and self.hwnd:
             self._set_child_style(False)
             user32.SetParent(self.hwnd, None)
         self.host = None
         self.mode = "bottom"
-        try:
-            # 작업 표시줄에 안 보이게. Tk가 창을 새로 만들 수 있어서 핸들을 다시 얻는다.
-            self.root.attributes("-toolwindow", True)
-            self._resolve_hwnd()
-        except tk.TclError:
-            pass
+        # 클릭해도 활성화(맨 앞으로 올라옴)되지 않게
+        ex = _GetWindowLong(self.hwnd, GWL_EXSTYLE)
+        _SetWindowLong(self.hwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE)
         user32.SetWindowPos(self.hwnd, HWND_BOTTOM, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW)
-        log("맨 아래 창 모드로 전환 (%d,%d %dx%d)" % (x, y, w, h))
+        log("맨 아래 창 모드 (%d,%d %dx%d) 표시=%s" % (
+            x, y, w, h, bool(user32.IsWindowVisible(self.hwnd))))
+
+    def place(self, x, y, w, h):
+        if not IS_WINDOWS or self.hwnd is None:
+            return
+        if self.mode == "desktop" and self.host:
+            pt = wintypes.POINT(x, y)
+            user32.ScreenToClient(self.host, ctypes.byref(pt))
+            user32.SetWindowPos(self.hwnd, HWND_TOP, pt.x, pt.y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW)
+        else:
+            user32.SetWindowPos(self.hwnd, HWND_BOTTOM, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW)
 
     def covered_by_desktop(self):
         """창 가운데 지점을 찍어 봤을 때 바탕화면(아이콘)이 우리 창을 덮고 있으면 True."""
@@ -462,7 +486,7 @@ class DesktopPin:
         return cls in ("Progman", "WorkerW")
 
     def verify(self, x, y, w, h):
-        """붙인 직후 한 번: 아이콘에 가려졌으면 위로 올리고, 그래도 안 되면 맨 아래 창 모드로."""
+        """바탕화면 모드로 붙인 직후 한 번: 가려졌으면 맨 아래 창 모드로."""
         if self.mode != "desktop":
             return
         if not self.covered_by_desktop():
@@ -472,20 +496,22 @@ class DesktopPin:
         self.root.update_idletasks()
         if self.covered_by_desktop():
             log("아이콘에 가려져서 맨 아래 창 모드로 바꿈")
-            self._fallback_bottom(x, y, w, h)
+            self._bottom(x, y, w, h)
 
-    def place(self, x, y, w, h):
-        if not IS_WINDOWS or self.hwnd is None:
+    def keep_fast(self):
+        """맨 아래 모드에서 자주 호출: 최소화/숨김되면 되살리고, 항상 맨 아래로."""
+        if not IS_WINDOWS or self.hwnd is None or self.mode != "bottom":
             return
-        if self.mode == "desktop" and self.host:
-            pt = wintypes.POINT(x, y)
-            user32.ScreenToClient(self.host, ctypes.byref(pt))
-            user32.SetWindowPos(self.hwnd, HWND_TOP, pt.x, pt.y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW)
-        else:
-            user32.SetWindowPos(self.hwnd, HWND_BOTTOM, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW)
+        if user32.IsIconic(self.hwnd) or not user32.IsWindowVisible(self.hwnd):
+            user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
+            self.restore_count += 1
+            if self.restore_count <= 5:
+                log("숨겨져서 되살림 (%d번째)" % self.restore_count)
+        user32.SetWindowPos(self.hwnd, HWND_BOTTOM, 0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
 
-    def keep(self, x, y, w, h):
-        """주기적으로 호출: 바탕화면 창이 바뀌었으면 다시 붙이고, 아이콘 위로 올린다."""
+    def keep(self, x, y, w, h, prefer="맨아래"):
+        """가끔 호출: 창 핸들이나 바탕화면 창이 바뀌었으면 다시 붙인다."""
         if not IS_WINDOWS or self.hwnd is None:
             return
         current = user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
@@ -494,20 +520,17 @@ class DesktopPin:
             log("창 핸들이 바뀜: %s -> %s, 다시 붙임" % (self.hwnd, current))
             self.hwnd = None
             self.host = None
-            self.attach(x, y, w, h)
+            self.attach(x, y, w, h, prefer)
             return
         if self.mode == "desktop":
             host = find_desktop_host()
             if host and host != self.host:
                 log("바탕화면 창이 바뀜: %s -> %s, 다시 붙임" % (self.host, host))
-                self.attach(x, y, w, h)
+                self.attach(x, y, w, h, prefer)
                 return
             if user32.GetWindow(self.hwnd, GW_HWNDPREV):
                 user32.SetWindowPos(self.hwnd, HWND_TOP, 0, 0, 0, 0,
                                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
-        elif self.mode == "bottom":
-            user32.SetWindowPos(self.hwnd, HWND_BOTTOM, 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
 
 
 # ----------------------------------------------------------------------------
@@ -527,6 +550,7 @@ class NoticeBoard:
     CONFIG_POLL_MS = 2000
     CLOCK_MS = 1000
     PIN_MS = 3000
+    PIN_FAST_MS = 300
 
     def __init__(self, root, force_window=False):
         self.root = root
@@ -546,6 +570,11 @@ class NoticeBoard:
         root.title(APP_NAME)
         root.overrideredirect(not force_window)
         root.resizable(False, False)
+        if IS_WINDOWS and not force_window:
+            try:
+                root.attributes("-toolwindow", True)  # 작업 표시줄·Alt+Tab에 안 나오게
+            except tk.TclError:
+                pass
 
         self.frame = tk.Frame(root, bd=0, highlightthickness=0)
         self.frame.pack(fill="both", expand=True)
@@ -556,6 +585,7 @@ class NoticeBoard:
         if IS_WINDOWS and not force_window:
             self.root.after(500, self.attach_to_desktop)
             self.root.after(self.PIN_MS, self.poll_pin)
+            self.root.after(self.PIN_FAST_MS, self.poll_pin_fast)
 
     # -- 설정 --------------------------------------------------------------
 
@@ -637,15 +667,20 @@ class NoticeBoard:
             self.pin.place(self.x, self.y, self.w, self.h)
 
     def attach_to_desktop(self):
-        mode = self.pin.attach(self.x, self.y, self.w, self.h)
+        prefer = self.win.get("방식", "맨아래")
+        mode = self.pin.attach(self.x, self.y, self.w, self.h, prefer)
         self.attached = True
         self.pin.place(self.x, self.y, self.w, self.h)
         self.mode = mode  # "desktop": 바탕화면에 붙음, "bottom": 맨 아래 창으로 유지
         self.root.after(1000, lambda: self.pin.verify(self.x, self.y, self.w, self.h))
 
     def poll_pin(self):
-        self.pin.keep(self.x, self.y, self.w, self.h)
+        self.pin.keep(self.x, self.y, self.w, self.h, self.win.get("방식", "맨아래"))
         self.root.after(self.PIN_MS, self.poll_pin)
+
+    def poll_pin_fast(self):
+        self.pin.keep_fast()
+        self.root.after(self.PIN_FAST_MS, self.poll_pin_fast)
 
     # -- 그리기 -------------------------------------------------------------
 
