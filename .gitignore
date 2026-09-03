@@ -1,7 +1,2 @@
-.env
-logs/
-data/
-.vercel/
-node_modules/
-
-.env*.local
+__pycache__/
+공지판_오류.txt
