@@ -1,7 +1,0 @@
-.env
-logs/
-data/
-.vercel/
-node_modules/
-
-.env*.local
