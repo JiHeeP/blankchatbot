@@ -29,6 +29,7 @@ IS_WINDOWS = sys.platform.startswith("win")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "공지.txt")
 ERROR_LOG = os.path.join(BASE_DIR, "공지판_오류.txt")
+LOG_PATH = os.path.join(BASE_DIR, "공지판_로그.txt")
 APP_NAME = "칠판공지판"
 
 ONE_DAY = dt.timedelta(days=1)
@@ -109,6 +110,15 @@ SAMPLE_CONFIG = """# ===============================================
 강조색 = #fbbf24
 투명도 = 1
 """
+
+
+def log(message):
+    """진단용 기록. 실행할 때마다 공지판_로그.txt에 남긴다."""
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write("%s  %s\n" % (dt.datetime.now().strftime("%H:%M:%S"), message))
+    except OSError:
+        pass
 
 
 # ----------------------------------------------------------------------------
@@ -280,6 +290,23 @@ if IS_WINDOWS:
                                     ctypes.c_int, ctypes.c_int, wintypes.UINT]
     user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
     user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.WindowFromPoint.argtypes = [wintypes.POINT]
+    user32.WindowFromPoint.restype = wintypes.HWND
+    user32.IsChild.argtypes = [wintypes.HWND, wintypes.HWND]
+    user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetAncestor.restype = wintypes.HWND
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    if ctypes.sizeof(ctypes.c_void_p) == 8:
+        _GetWindowLong = user32.GetWindowLongPtrW
+        _SetWindowLong = user32.SetWindowLongPtrW
+    else:
+        _GetWindowLong = user32.GetWindowLongW
+        _SetWindowLong = user32.SetWindowLongW
+    _GetWindowLong.argtypes = [wintypes.HWND, ctypes.c_int]
+    _GetWindowLong.restype = ctypes.c_ssize_t
+    _SetWindowLong.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+    _SetWindowLong.restype = ctypes.c_ssize_t
 
     HWND_TOP = 0
     HWND_BOTTOM = 1
@@ -289,6 +316,10 @@ if IS_WINDOWS:
     SWP_SHOWWINDOW = 0x0040
     GW_HWNDPREV = 3
     SW_SHOWNOACTIVATE = 4
+    GA_ROOT = 2
+    GWL_STYLE = -16
+    WS_CHILD = 0x40000000
+    WS_POPUP = 0x80000000
 
     class MONITORINFO(ctypes.Structure):
         _fields_ = [("cbSize", wintypes.DWORD),
@@ -369,28 +400,79 @@ class DesktopPin:
         parent = user32.GetParent(child)
         self.hwnd = parent or child
 
+    def _set_child_style(self, child):
+        """SetParent 전후로 WS_POPUP <-> WS_CHILD 스타일을 맞춘다 (MS 권장)."""
+        style = _GetWindowLong(self.hwnd, GWL_STYLE)
+        if child:
+            style = (style & ~WS_POPUP) | WS_CHILD
+        else:
+            style = (style & ~WS_CHILD) | WS_POPUP
+        _SetWindowLong(self.hwnd, GWL_STYLE, style)
+
     def attach(self, x, y, w, h):
         if not IS_WINDOWS:
             return "window"
         if self.hwnd is None:
             self._resolve_hwnd()
         host = find_desktop_host()
+        log("붙이기 시도: 창=%s 바탕화면창=%s(%s)" % (
+            self.hwnd, host, _class_name(host) if host else "-"))
         if host:
             if user32.GetParent(self.hwnd) != host:
+                self._set_child_style(True)
                 user32.SetParent(self.hwnd, host)
             self.host = host
             self.mode = "desktop"
             self.place(x, y, w, h)
+            log("바탕화면 모드로 붙임 (%d,%d %dx%d) 표시=%s" % (
+                x, y, w, h, bool(user32.IsWindowVisible(self.hwnd))))
         else:
-            self.mode = "bottom"
-            try:
-                # 작업 표시줄에 안 보이게. Tk가 창을 새로 만들 수 있어서 핸들을 다시 얻는다.
-                self.root.attributes("-toolwindow", True)
-                self._resolve_hwnd()
-            except tk.TclError:
-                pass
-            user32.SetWindowPos(self.hwnd, HWND_BOTTOM, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW)
+            self._fallback_bottom(x, y, w, h)
         return self.mode
+
+    def _fallback_bottom(self, x, y, w, h):
+        """바탕화면 창에 못 붙이면 '항상 맨 아래 보통 창'으로 동작."""
+        if self.host and self.hwnd:
+            self._set_child_style(False)
+            user32.SetParent(self.hwnd, None)
+        self.host = None
+        self.mode = "bottom"
+        try:
+            # 작업 표시줄에 안 보이게. Tk가 창을 새로 만들 수 있어서 핸들을 다시 얻는다.
+            self.root.attributes("-toolwindow", True)
+            self._resolve_hwnd()
+        except tk.TclError:
+            pass
+        user32.SetWindowPos(self.hwnd, HWND_BOTTOM, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW)
+        log("맨 아래 창 모드로 전환 (%d,%d %dx%d)" % (x, y, w, h))
+
+    def covered_by_desktop(self):
+        """창 가운데 지점을 찍어 봤을 때 바탕화면(아이콘)이 우리 창을 덮고 있으면 True."""
+        if not IS_WINDOWS or self.hwnd is None or self.mode != "desktop":
+            return False
+        rect = wintypes.RECT()
+        user32.GetWindowRect(self.hwnd, ctypes.byref(rect))
+        pt = wintypes.POINT((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
+        found = user32.WindowFromPoint(pt)
+        if not found or found == self.hwnd or user32.IsChild(self.hwnd, found):
+            return False
+        top = user32.GetAncestor(found, GA_ROOT)
+        cls = _class_name(top)
+        log("가려짐 검사: 그 자리 창=%s(%s) 최상위=%s" % (found, _class_name(found), cls))
+        return cls in ("Progman", "WorkerW")
+
+    def verify(self, x, y, w, h):
+        """붙인 직후 한 번: 아이콘에 가려졌으면 위로 올리고, 그래도 안 되면 맨 아래 창 모드로."""
+        if self.mode != "desktop":
+            return
+        if not self.covered_by_desktop():
+            log("확인: 바탕화면 위에 정상 표시")
+            return
+        user32.SetWindowPos(self.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+        self.root.update_idletasks()
+        if self.covered_by_desktop():
+            log("아이콘에 가려져서 맨 아래 창 모드로 바꿈")
+            self._fallback_bottom(x, y, w, h)
 
     def place(self, x, y, w, h):
         if not IS_WINDOWS or self.hwnd is None:
@@ -409,6 +491,7 @@ class DesktopPin:
         current = user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
         if current != self.hwnd:
             # 창 속성이 바뀌면 Tk가 창을 새로 만들기도 한다. 그러면 처음부터 다시 붙인다.
+            log("창 핸들이 바뀜: %s -> %s, 다시 붙임" % (self.hwnd, current))
             self.hwnd = None
             self.host = None
             self.attach(x, y, w, h)
@@ -416,6 +499,7 @@ class DesktopPin:
         if self.mode == "desktop":
             host = find_desktop_host()
             if host and host != self.host:
+                log("바탕화면 창이 바뀜: %s -> %s, 다시 붙임" % (self.host, host))
                 self.attach(x, y, w, h)
                 return
             if user32.GetWindow(self.hwnd, GW_HWNDPREV):
@@ -557,6 +641,7 @@ class NoticeBoard:
         self.attached = True
         self.pin.place(self.x, self.y, self.w, self.h)
         self.mode = mode  # "desktop": 바탕화면에 붙음, "bottom": 맨 아래 창으로 유지
+        self.root.after(1000, lambda: self.pin.verify(self.x, self.y, self.w, self.h))
 
     def poll_pin(self):
         self.pin.keep(self.x, self.y, self.w, self.h)
@@ -725,9 +810,18 @@ def main(argv):
     if "--autostart-remove" in argv:
         return remove_autostart()
 
+    try:
+        open(LOG_PATH, "w", encoding="utf-8").close()
+    except OSError:
+        pass
+    log("시작: Python %s, %s, 옵션=%s" % (sys.version.split()[0], sys.platform, argv or "없음"))
+    log("폴더: %s" % BASE_DIR)
+
     root = tk.Tk()
     NoticeBoard(root, force_window="--window" in argv)
+    log("창 준비 완료, 화면 크기 %dx%d" % (root.winfo_screenwidth(), root.winfo_screenheight()))
     root.mainloop()
+    log("종료")
     return 0
 
 
