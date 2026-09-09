@@ -355,7 +355,7 @@ def save_cache(path, report):
 # 표시용 문장
 # ----------------------------------------------------------------------------
 
-def format_names(missing, per_line=4):
+def format_names(missing, per_line=3):
     """[(번호, 이름)] → ['3번 김철수 · 7번 이영희 · ...', ...] 줄 목록."""
     items = ["%s번 %s" % (no, name) if name else "%s번" % no for no, name in missing]
     return [" · ".join(items[i:i + per_line]) for i in range(0, len(items), per_line)]
