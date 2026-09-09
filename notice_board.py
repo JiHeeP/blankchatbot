@@ -904,8 +904,9 @@ class NoticeBoard:
             return
 
         if r["missing"]:
-            for line in math_alert.format_names(r["missing"]):
-                tk.Label(body, text=line, font=self.font(1.0, True), bg=bg, fg=accent, anchor="w",
+            name_font = self.font(1.0, True)
+            for line in self._pack_names(r["missing"], name_font, wrap - 16):
+                tk.Label(body, text=line, font=name_font, bg=bg, fg=accent, anchor="w",
                          justify="left", wraplength=wrap).pack(fill="x", padx=(16, 0), pady=1)
         else:
             tk.Label(body, text="모두 했어요!", font=self.font(1.0, True), bg=bg, fg=accent,
@@ -921,6 +922,23 @@ class NoticeBoard:
             note += " · %s에 받은 내용" % when
         tk.Label(body, text=note, font=small, bg=bg, fg=sub, anchor="w", justify="left",
                  wraplength=wrap).pack(fill="x", padx=(16, 0), pady=(2, 12))
+
+    @staticmethod
+    def _pack_names(missing, font, max_px):
+        """'3번 김철수' 들을 이름이 줄 중간에서 끊기지 않도록 폭에 맞춰 줄로 묶는다."""
+        items = ["%s번 %s" % (no, name) if name else "%s번" % no for no, name in missing]
+        sep = " · "
+        lines, cur = [], ""
+        for item in items:
+            trial = item if not cur else cur + sep + item
+            if cur and font.measure(trial) > max_px:
+                lines.append(cur)
+                cur = item
+            else:
+                cur = trial
+        if cur:
+            lines.append(cur)
+        return lines
 
     # -- 시계 ---------------------------------------------------------------
 
