@@ -7,6 +7,8 @@
   다른 프로그램 창을 띄우면 가려지고, 바탕화면을 보면 다시 보입니다.
 - 같은 폴더의 `공지.txt` 파일을 메모장으로 고치고 저장하면 몇 초 안에 화면이 바뀝니다.
 - 우유 순서는 시작일과 순서 목록만 적어 두면 평일마다 자동으로 넘어갑니다.
+- [수학 반코드]를 적어 두면 분수 연산 마스터(mathpractice)에서
+  이전 등교일에 연습하지 않은 학생을 받아와 보여 줍니다. (math_alert.py)
 
 실행:   pythonw notice_board.py        (또는 공지판_실행.bat 더블클릭)
 옵션:   --autostart          윈도우 시작 시 자동 실행 등록
@@ -17,26 +19,33 @@
 import ctypes
 import datetime as dt
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
 import traceback
 
 import tkinter as tk
 import tkinter.font as tkfont
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import math_alert  # noqa: E402  (같은 폴더의 math_alert.py)
 
 IS_WINDOWS = sys.platform.startswith("win")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "공지.txt")
 ERROR_LOG = os.path.join(BASE_DIR, "공지판_오류.txt")
 LOG_PATH = os.path.join(BASE_DIR, "공지판_로그.txt")
+MATH_CACHE_PATH = os.path.join(BASE_DIR, "수학_캐시.json")
 APP_NAME = "칠판공지판"
 
 ONE_DAY = dt.timedelta(days=1)
 WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
 
 # 화면에 목록으로 표시하지 않는 특수 구역
-RESERVED_SECTIONS = {"제목", "우유 순서", "우유 시작일", "우유 쉬는 날", "창"}
+RESERVED_SECTIONS = {"제목", "우유 순서", "우유 시작일", "우유 쉬는 날", "창",
+                     "수학 반코드", "수학 설정", "등교 안 하는 날"}
 
 DEFAULT_WINDOW = {
     "위치": "오른쪽 위",
@@ -83,6 +92,26 @@ SAMPLE_CONFIG = """# ===============================================
 2026-10-05
 2026-10-09
 2026-12-25
+
+[수학 반코드]
+# 분수 연산 마스터(mathpractice) 교사 화면 위쪽에 보이는 반 코드 6글자.
+# 적어 두면 '이전 등교일에 수학을 안 한 학생'을 받아와 보여 줍니다. 비워 두면 꺼집니다.
+
+
+[수학 설정]
+# 갱신 = 몇 분마다 다시 받아올지 (기본 30)
+# 구역이름 = 화면에 보일 제목 (기본 '어제 수학 안 한 사람')
+# 기준 = 아무거나(연습·도전 아무 기록이나) / 도전(도전 기록만)
+갱신 = 30
+구역이름 = 어제 수학 안 한 사람
+기준 = 아무거나
+
+[등교 안 하는 날]
+# 주말과 공휴일(대체공휴일 포함)은 자동으로 뺍니다.
+# 설·추석·재량휴업일·방학처럼 해마다 다른 날만 적어 주세요. (연-월-일, '#' 뒤는 메모)
+# 분수 연산 마스터 교사 화면에 저장한 '등교 안 하는 날'도 자동으로 합쳐집니다.
+2026-09-24  # 추석 연휴
+2026-09-25
 
 [오늘 할 일]
 - 알림장 쓰기
@@ -551,6 +580,8 @@ class NoticeBoard:
     CLOCK_MS = 1000
     PIN_MS = 3000
     PIN_FAST_MS = 300
+    MATH_QUEUE_MS = 500
+    MATH_RETRY_MS = 5 * 60 * 1000     # 실패했을 때 다시 시도하는 간격
 
     def __init__(self, root, force_window=False):
         self.root = root
@@ -562,6 +593,14 @@ class NoticeBoard:
         self.order = []
         self.win = dict(DEFAULT_WINDOW)
         self.milk = MilkSchedule([], None, [])
+        self.math_code = ""               # [수학 반코드]
+        self.math_settings = {}           # [수학 설정]
+        self.local_off_days = []          # [등교 안 하는 날]
+        self.math_report = None           # 마지막으로 성공한 결과 (캐시 포함)
+        self.math_error = ""              # 마지막 실패 이유
+        self.math_loading = False
+        self.math_queue = queue.Queue()
+        self.math_timer = None
         self.today = dt.date.today()
         self.x = self.y = 0
         self.w = self.h = 100
@@ -582,6 +621,7 @@ class NoticeBoard:
         self.load_config(initial=True)
         self.tick_clock()
         self.poll_config()
+        self.poll_math_queue()
         if IS_WINDOWS and not force_window:
             self.root.after(500, self.attach_to_desktop)
             self.root.after(self.PIN_MS, self.poll_pin)
@@ -603,6 +643,7 @@ class NoticeBoard:
             next((d for d in map(parse_date, self.sections.get("우유 시작일", [])) if d), None),
             [d for d in map(parse_date, self.sections.get("우유 쉬는 날", [])) if d],
         )
+        self.configure_math()
         self.build()
         self.apply_geometry()
 
@@ -727,6 +768,9 @@ class NoticeBoard:
             else:
                 tk.Frame(body, bg=bg, height=14).pack()
 
+        # 이전 등교일에 수학을 안 한 학생
+        self._draw_math(body, bg, fg, sub, accent, wrap)
+
         # 나머지 구역
         for name in self.order:
             if name in RESERVED_SECTIONS:
@@ -762,6 +806,122 @@ class NoticeBoard:
         tk.Frame(row, bg=accent, width=6).pack(side="left", fill="y", padx=(0, 10))
         tk.Label(row, text=text, font=self.font(0.95, True), bg=bg, fg=fg, anchor="w").pack(side="left")
 
+    # -- 수학 미실시 학생 (mathpractice) ------------------------------------
+
+    def configure_math(self):
+        """공지.txt 의 수학 관련 구역을 읽고, 바뀌었으면 바로 다시 받아온다."""
+        code = ""
+        for line in self.sections.get("수학 반코드", []):
+            token = line.split("#", 1)[0].strip()
+            if token:
+                code = token.upper()
+                break
+        settings = {}
+        for line in self.sections.get("수학 설정", []):
+            if "=" in line:
+                k, v = line.split("=", 1)
+                settings[k.strip()] = v.split("#", 1)[0].strip()
+        off_days = math_alert.parse_off_days(self.sections.get("등교 안 하는 날", []))
+
+        changed = (code, settings, off_days) != (self.math_code, self.math_settings, self.local_off_days)
+        self.math_code, self.math_settings, self.local_off_days = code, settings, off_days
+        if not changed:
+            return
+        self.math_report = None
+        self.math_error = ""
+        if code:
+            cached = math_alert.load_cache(MATH_CACHE_PATH)
+            if cached and cached.get("class_code") == code:
+                self.math_report = cached
+            self.refresh_math()
+        elif self.math_timer:
+            self.root.after_cancel(self.math_timer)
+            self.math_timer = None
+
+    def math_interval_ms(self):
+        minutes = max(1, to_int(self.math_settings.get("갱신"), 30))
+        return minutes * 60 * 1000
+
+    def refresh_math(self):
+        """백그라운드 스레드에서 받아온다. 결과는 poll_math_queue 가 화면에 반영."""
+        if self.math_timer:
+            self.root.after_cancel(self.math_timer)
+            self.math_timer = None
+        if not self.math_code or self.math_loading:
+            return
+        self.math_loading = True
+        code, settings, off_days = self.math_code, dict(self.math_settings), list(self.local_off_days)
+
+        def work():
+            try:
+                report = math_alert.build_report(code, settings, off_days)
+                self.math_queue.put(("ok", code, report))
+            except math_alert.FetchError as e:
+                self.math_queue.put(("error", code, str(e)))
+            except Exception as e:  # noqa: BLE001 — 스레드 안의 예외는 화면에 짧게만
+                log("수학 알림 오류: %s" % traceback.format_exc())
+                self.math_queue.put(("error", code, str(e) or e.__class__.__name__))
+
+        threading.Thread(target=work, name="math-alert", daemon=True).start()
+
+    def poll_math_queue(self):
+        try:
+            while True:
+                kind, code, payload = self.math_queue.get_nowait()
+                self.math_loading = False
+                if code != self.math_code:
+                    continue          # 받아오는 사이에 반 코드가 바뀜
+                if kind == "ok":
+                    self.math_report = payload
+                    self.math_error = ""
+                    math_alert.save_cache(MATH_CACHE_PATH, payload)
+                    log("수학 알림: %s 기준 %d명 중 %d명 안 함" % (
+                        payload["date_label"], payload["total"], len(payload["missing"])))
+                    wait = self.math_interval_ms()
+                else:
+                    self.math_error = payload
+                    log("수학 알림 실패: %s" % payload)
+                    wait = min(self.MATH_RETRY_MS, self.math_interval_ms())
+                self.math_timer = self.root.after(wait, self.refresh_math)
+                self.build()
+                self.apply_geometry()
+        except queue.Empty:
+            pass
+        self.root.after(self.MATH_QUEUE_MS, self.poll_math_queue)
+
+    def _draw_math(self, body, bg, fg, sub, accent, wrap):
+        if not self.math_code:
+            return
+        title = self.math_settings.get("구역이름") or math_alert.DEFAULT_SETTINGS["구역이름"]
+        self._section_header(body, title, bg, fg, accent)
+        r = self.math_report
+        small = self.font(0.8)
+
+        if r is None:
+            text = "불러오는 중..." if not self.math_error else "수학 기록을 못 받았어요 — %s" % self.math_error
+            tk.Label(body, text=text, font=small, bg=bg, fg=sub, anchor="w", justify="left",
+                     wraplength=wrap).pack(fill="x", padx=(16, 0), pady=(0, 12))
+            return
+
+        if r["missing"]:
+            for line in math_alert.format_names(r["missing"]):
+                tk.Label(body, text=line, font=self.font(1.0, True), bg=bg, fg=accent, anchor="w",
+                         justify="left", wraplength=wrap).pack(fill="x", padx=(16, 0), pady=1)
+        else:
+            tk.Label(body, text="모두 했어요!", font=self.font(1.0, True), bg=bg, fg=accent,
+                     anchor="w", justify="left").pack(fill="x", padx=(16, 0), pady=1)
+
+        note = "%s 기준 · %d명 중 %d명 안 함" % (r["date_label"], r["total"], len(r["missing"]))
+        when = r.get("fetched_at", "")
+        if r.get("fetched_date") and r["fetched_date"] != self.today.strftime("%Y-%m-%d"):
+            when = "%s %s" % (r["fetched_date"][5:].replace("-", "/"), when)   # 다른 날 받은 것이면 날짜도
+        if self.math_error:
+            note += " · %s에 받은 내용 (%s)" % (when, self.math_error)
+        elif when != r.get("fetched_at", ""):
+            note += " · %s에 받은 내용" % when
+        tk.Label(body, text=note, font=small, bg=bg, fg=sub, anchor="w", justify="left",
+                 wraplength=wrap).pack(fill="x", padx=(16, 0), pady=(2, 12))
+
     # -- 시계 ---------------------------------------------------------------
 
     def update_clock_text(self):
@@ -777,6 +937,7 @@ class NoticeBoard:
             self.today = today
             self.build()          # 날짜가 바뀌면 우유 당번을 다시 계산
             self.apply_geometry()
+            self.refresh_math()   # '이전 등교일'도 바뀌므로 다시 받아온다
         else:
             self.update_clock_text()
         self.root.after(self.CLOCK_MS, self.tick_clock)
