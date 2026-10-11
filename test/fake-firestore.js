@@ -49,21 +49,38 @@ export function fakeFirestoreFetch(db, opts = {}) {
       return reply(body);
     }
 
-    const q = JSON.parse(init.body);
-    const key = q.structuredQuery.where.fieldFilter.value.stringValue;
-    const rows = cls.results.filter((r) => r.dateKey === key)
-      .map((r, i) => ({ document: doc(`classes/${code}/results/r${i}`, { dateKey: r.dateKey, studentNo: Number(r.studentNo), mode: r.mode || 'practice' }) }));
+    // 같음(EQUAL) 조건만, 하나 또는 AND 로 묶인 여러 개
+    const q = JSON.parse(init.body).structuredQuery.where;
+    const filters = (q.compositeFilter ? q.compositeFilter.filters : [q]).map((f) => f.fieldFilter);
+    const full = (r) => ({ level: 'L1', mode: 'practice', score: null, ...r });
+    const rows = cls.results.map(full)
+      .filter((r) => filters.every((f) => String(r[f.field.fieldPath]) === f.value.stringValue))
+      .map((r, i) => ({
+        document: doc(`classes/${code}/results/r${i}`, {
+          dateKey: r.dateKey, studentNo: String(r.studentNo), mode: r.mode, level: r.level, score: r.score,
+        }),
+      }));
     return reply(rows.length ? rows : [{ readTime: new Date().toISOString() }]);
   };
   fn.calls = calls;
   return fn;
 }
 
-/** 로컬 개발용 샘플 반: 반 코드 TEST01, 이전 등교일 기록에서 3번·7번·12번이 빠짐 */
+/**
+ * 로컬 개발용 샘플 반: 반 코드 TEST01 (18명 + '테스트' 99번)
+ * - 이전 등교일 기록에서 3번·7번·12번·99번이 빠짐
+ * - 12번은 예전에 마지막 단계(L27) 통과(218점) → 미실시에서 빠져야 함
+ * - 3번은 L27 을 했지만 통과 점수(216) 미달(200점) → 미실시에 남아야 함
+ */
 export function sampleDb(prevDateKey) {
-  const students = SAMPLE_NAMES.map((name, i) => ({ no: String(i + 1), name }));
+  const students = [...SAMPLE_NAMES.map((name, i) => ({ no: String(i + 1), name })), { no: '99', name: '테스트' }];
   const results = students
-    .filter((s) => !['3', '7', '12'].includes(s.no))
-    .map((s) => ({ dateKey: prevDateKey, studentNo: s.no, mode: s.no === '5' ? 'practice' : 'challenge' }));
+    .filter((s) => !['3', '7', '12', '99'].includes(s.no))
+    .map((s) => ({ dateKey: prevDateKey, studentNo: s.no, mode: s.no === '5' ? 'free' : 'challenge', level: 'L3', score: 100 }));
+  results.push(
+    { dateKey: '2026-09-01', studentNo: '12', mode: 'challenge', level: 'L27', score: 218 },
+    { dateKey: '2026-09-01', studentNo: '3', mode: 'challenge', level: 'L27', score: 200 },
+    { dateKey: '2026-09-01', studentNo: '7', mode: 'free', level: 'L27', score: null },
+  );
   return { TEST01: { name: '5학년 4반', offDays: [], students, results } };
 }

@@ -182,6 +182,33 @@ h1, h2, p { margin: 0; }
 .missing-label { font-weight: 800; color: var(--danger); }
 .missing.all { color: var(--done); font-weight: 800; }
 
+/* ---- 과제 저장·지난 기록 ---- */
+.save-btn { font-size: clamp(16px, 1.2vw, 20px); white-space: nowrap; }
+.records-btn { white-space: nowrap; }
+.title-block { margin-right: auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.title-block .page-title { margin-right: 0; }
+.eyebrow { font-size: clamp(14px, 1.1vw, 18px); font-weight: 700; color: var(--brand-2); }
+.record-list { display: flex; flex-direction: column; gap: 10px; }
+.record-card {
+  display: grid;
+  grid-template-columns: 9em 1fr auto;
+  grid-template-areas: "date title count" "date missing missing";
+  gap: 2px 16px;
+  align-items: center;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  min-height: 64px;
+}
+.record-card:hover { border-color: var(--ink-2); }
+.record-date { grid-area: date; font-weight: 700; color: var(--ink-2); }
+.record-title { grid-area: title; font-weight: 800; font-size: clamp(17px, 1.4vw, 24px); }
+.record-count { grid-area: count; font-weight: 800; color: var(--ink-2); font-size: clamp(16px, 1.3vw, 22px); }
+.record-count.all { color: var(--done); }
+.record-missing { grid-area: missing; color: var(--ink-2); font-size: .9em; }
+
 /* ---- 번호 뽑기 ---- */
 .seg { display: inline-flex; background: var(--picked); border-radius: 12px; padding: 4px; }
 .seg-btn { border: 0; background: transparent; padding: 10px 22px; border-radius: 9px; font-weight: 800; min-height: 48px; font-size: clamp(16px, 1.2vw, 20px); }
@@ -357,6 +384,8 @@ details.sub .input { margin: 10px 0; }
   .chip-bar { flex-wrap: wrap; }
   .page-head { gap: 8px; }
   .reveal-box { min-width: 0; width: 100%; }
+  .record-card { grid-template-columns: 1fr auto; grid-template-areas: "date count" "title title" "missing missing"; }
+  .save-btn { width: 100%; order: 5; }
 }
 
 /* 칠판에서 전체 화면일 때는 여백을 줄여 칸을 더 크게 */

@@ -88,6 +88,14 @@ test('과제: 만들기 → 체크 → 반복 → 해제 → 이름 바꾸기 �
   await store.renameAssignment(id, '받아쓰기');
   await waitState(store, (st) => st.assignments[0].title === '받아쓰기');
 
+  await store.closeAssignment(id);
+  let saved = await waitState(store, (st) => Boolean(st.assignments[0].closedAt));
+  assert.equal(Object.keys(saved.assignments[0].done).length, 1); // 저장해도 체크는 그대로
+  await store.setDone(id, roster[2].id, true); // 저장한 뒤에도 늦게 낸 학생 체크 가능
+  await waitState(store, (st) => Object.keys(st.assignments[0].done).length === 2);
+  await store.reopenAssignment(id);
+  saved = await waitState(store, (st) => !st.assignments[0].closedAt);
+
   await store.resetAssignment(id);
   await waitState(store, (st) => Object.keys(st.assignments[0].done).length === 0);
 
@@ -138,13 +146,16 @@ test('수학: 결과를 room 캐시에 남기고, 실패하면 마지막 결과�
 
   const ok = fakeFirestoreFetch(sampleDb('2026-10-08'));
   const r1 = await store.getMath(room, { fetchImpl: ok, base, at });
-  assert.deepEqual(r1.missing.map((s) => s.no), ['3', '7', '12']);
+  // 기본 제외(전지현·테스트)와 L27 통과(12번)는 빠짐
+  assert.deepEqual(r1.missing.map((s) => s.no), ['3', '7']);
+  assert.deepEqual(r1.graduated.map((s) => s.no), ['12']);
+  assert.deepEqual(r1.excluded.map((s) => s.name), ['테스트']);
   assert.equal(r1.cached, false);
 
   await new Promise((r) => setTimeout(r, 300)); // 캐시 저장 기다림
   const r2 = await store.getMath(room, { fetchImpl: ok, base, at });
   assert.equal(r2.cached, true);
-  assert.equal(ok.calls.length, 3);
+  assert.equal(ok.calls.length, 4); // 반 + 명단 + 그날 기록 + L27 기록. 두 번째는 캐시라 호출 없음
 
   const later = new Date(at.getTime() + 11 * 60 * 1000);
   const r3 = await store.getMath(room, { fetchImpl: fakeFirestoreFetch({}, { status: 429 }), base, at: later });
