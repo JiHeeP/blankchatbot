@@ -152,6 +152,29 @@ async function main() {
   assert(skip.includes('오수아') && skip.includes('테스트'), `L27 통과·제외 학생은 빠짐 (${skip.trim()})`);
   await shot(page, '03-math');
 
+  console.log('누적 벌 대상: 설정 → 큰 이름 → 해제');
+  await page.getByRole('link', { name: '우리 반' }).click();
+  await page.getByLabel('누적 세기 시작일').fill(prev);
+  await page.getByLabel('벌 기준 횟수').fill('1');
+  await page.getByRole('button', { name: '설정 저장' }).click();
+  await page.locator('.toast', { hasText: '설정을 저장했어요' }).waitFor();
+  await page.getByRole('link', { name: '수학 확인' }).click();
+  await page.locator('.penalty-card').first().waitFor({ timeout: 10000 });
+  const cards = await page.locator('.penalty-card').allTextContents();
+  assert(cards.length === 2 && cards.join(' ').includes('박도윤') && cards.join(' ').includes('조하준'), `누적 1회 이상 2명이 아래에 따로: ${cards.join(' / ')}`);
+  assert(cards[0].includes('누적 1회'), '누적 횟수가 같이 보임');
+  const bigName = await page.locator('.penalty-name').first().evaluate((n) => parseFloat(getComputedStyle(n).fontSize));
+  const chipName = await page.locator('.name-chip').first().evaluate((n) => parseFloat(getComputedStyle(n).fontSize));
+  assert(bigName > chipName, `벌 대상 이름이 위쪽 목록보다 큼 (${bigName}px > ${chipName}px)`);
+  await shot(page, '03-math-penalty');
+  await page.locator('.penalty-card', { hasText: '박도윤' }).getByRole('button', { name: /해제/ }).click();
+  await page.getByRole('button', { name: '해제하고 0부터', exact: true }).click();
+  await page.locator('.penalty-card', { hasText: '박도윤' }).waitFor({ state: 'detached', timeout: 10000 });
+  await page.waitForFunction(() => document.querySelectorAll('.penalty-card').length === 1, null, { timeout: 10000 });
+  assert(await page.locator('.penalty-card', { hasText: '조하준' }).count() === 1, '해제한 학생만 빠지고 다른 학생은 그대로');
+  assert(await page.locator('.name-chip', { hasText: '박도윤' }).count() === 1, '위쪽 "안 한 학생"에는 그대로 있음 (해제는 누적만 0으로)');
+  await shot(page, '03-math-cleared');
+
   console.log('오프라인');
   await board.setOffline(true);
   await page.evaluate(() => window.dispatchEvent(new Event('offline')));

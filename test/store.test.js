@@ -5,7 +5,7 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../public/js/store.js';
-import { fakeFirestoreFetch, sampleDb, SAMPLE_NAMES } from './fake-firestore.js';
+import { fakeFirestoreFetch, sampleDb, weekDb, WEEK_DAYS, SAMPLE_NAMES } from './fake-firestore.js';
 
 const HOST = process.env.FIRESTORE_EMULATOR_HOST;
 const skip = HOST ? false : 'FIRESTORE_EMULATOR_HOST 가 없어서 건너뜀';
@@ -155,7 +155,7 @@ test('수학: 결과를 room 캐시에 남기고, 실패하면 마지막 결과�
   await new Promise((r) => setTimeout(r, 300)); // 캐시 저장 기다림
   const r2 = await store.getMath(room, { fetchImpl: ok, base, at });
   assert.equal(r2.cached, true);
-  assert.equal(ok.calls.length, 4); // 반 + 명단 + 그날 기록 + L27 기록. 두 번째는 캐시라 호출 없음
+  assert.equal(ok.calls.length, 5); // 반 + 명단 + 그날 기록 + 접속 기록 + L27 기록. 두 번째는 캐시라 호출 없음
 
   const later = new Date(at.getTime() + 11 * 60 * 1000);
   const r3 = await store.getMath(room, { fetchImpl: fakeFirestoreFetch({}, { status: 429 }), base, at: later });
@@ -186,4 +186,54 @@ test('백업 내보내기 → 다른 반에 가져오기', { skip }, async () =>
   assert.equal(s.room.roster[1].id, roster[1].id);
   assert.deepEqual(Object.keys(s.assignments[0].done), [roster[1].id]);
   await assert.rejects(b.pick(did, roster[1]), (e) => e.code === 'already');
+});
+
+test('누적: 설정 검증 → 계산 → 해제하면 0부터 → 지난 날짜는 저장', { skip }, async () => {
+  const store = freshStore();
+  await withRoster(store);
+  await store.saveSettings({ mathCode: 'test01', mathCountStart: '2026-10-08', mathLimit: 3 });
+  await assert.rejects(store.saveSettings({ mathLimit: 0 }), (e) => e.code === 'invalid');
+  await assert.rejects(store.saveSettings({ mathCountStart: '언젠가' }), (e) => e.code === 'invalid');
+  let { room } = await waitState(store, (s) => s.room.mathCode === 'TEST01' && s.room.mathLimit === 3);
+  assert.equal(room.mathCountStart, '2026-10-08');
+  assert.deepEqual(room.mathCleared, {});
+
+  const base = 'http://fake/documents';
+  const at = new Date('2026-10-15T23:30:00Z'); // 한국 시간 10/16(금) 08:30 → 이전 등교일 10/15
+  const first = fakeFirestoreFetch(weekDb({ 3: WEEK_DAYS, 5: ['2026-10-12', '2026-10-13', '2026-10-14'] }));
+  const r1 = await store.getMath(room, { fetchImpl: first, base, at });
+  assert.deepEqual(r1.overLimit.map((s) => [s.no, s.count]), [['3', 5], ['5', 3]]);
+  assert.equal(first.calls.length, 5 + 4 * 2);
+
+  // 3번 학생 해제 → 그 날(이전 등교일)까지 지우고 0부터
+  await store.clearMathCount('3', r1.dateKey);
+  ({ room } = await waitState(store, (s) => s.room.mathCleared['3'] === '2026-10-15'));
+  const second = fakeFirestoreFetch(weekDb({ 3: WEEK_DAYS, 5: ['2026-10-12', '2026-10-13', '2026-10-14'] }));
+  const r2 = await store.getMath(room, { fetchImpl: second, base, at });
+  assert.equal(r2.counts['3'], 0);
+  assert.deepEqual(r2.overLimit.map((s) => s.no), ['5'], '해제한 학생만 빠지고 다른 학생은 그대로');
+  assert.equal(second.calls.length, 5, '지난 4일은 저장해 둔 것을 써서 다시 안 부름');
+
+  // 다음 등교일(10/19 월)에 3번이 또 안 하면 1회부터
+  const mon = new Date('2026-10-18T23:30:00Z'); // 한국 시간 10/19(월) 08:30 → 이전 등교일 10/16
+  const third = fakeFirestoreFetch(weekDb({ 3: WEEK_DAYS }));
+  const r3 = await store.getMath(room, { fetchImpl: third, base, at: mon });
+  assert.equal(r3.dateKey, '2026-10-16');
+  assert.equal(r3.counts['3'], 1, '해제 다음 등교일(10/16)부터 센다');
+});
+
+test('누적: 설정·해제 기록이 백업에 들어가고 복원됨', { skip }, async () => {
+  const a = freshStore();
+  await withRoster(a);
+  await a.saveSettings({ mathCode: 'test01', mathCountStart: '2026-10-12', mathLimit: 5 });
+  await a.clearMathCount('7', '2026-10-13');
+  const state = await waitState(a, (s) => s.room.mathCleared['7'] === '2026-10-13' && s.room.mathLimit === 5);
+  const backup = JSON.parse(JSON.stringify(a.exportAll(state)));
+
+  const b = freshStore();
+  const empty = await waitState(b, () => true);
+  await b.importAll(backup, empty);
+  const { room } = await waitState(b, (s) => s.room.mathLimit === 5);
+  assert.equal(room.mathCountStart, '2026-10-12');
+  assert.deepEqual(room.mathCleared, { 7: '2026-10-13' });
 });

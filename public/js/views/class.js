@@ -137,8 +137,9 @@ function settingsSection(ctx) {
   const save = async () => {
     try {
       await ctx.store.saveSettings({
-        className: s.className, mathCode: s.mathCode, mathMode: s.mathMode, offDaysText: s.offDaysText,
+        className: s.className, mathCode: s.mathCode, offDaysText: s.offDaysText,
         mathExcludeText: s.mathExcludeText,
+        mathCountStart: s.mathCountStart, mathLimit: s.mathLimit,
       });
       draft.settingsDirty = false;
       toast('설정을 저장했어요', 'ok');
@@ -158,10 +159,7 @@ function settingsSection(ctx) {
         on: { input: (e) => { s.mathCode = e.target.value.toUpperCase(); touch(); } },
       }),
       el('span.field-hint', '교사 화면 위쪽에 있는 6글자. 비워 두면 수학 확인이 꺼져요.')),
-    el('label.field', el('span.field-label', '수학을 "했다"로 볼 기준'),
-      el('select.input', { on: { change: (e) => { s.mathMode = e.target.value; touch(); } } },
-        el('option', { value: 'any', selected: s.mathMode !== 'challenge' }, '연습·도전 아무 기록이나'),
-        el('option', { value: 'challenge', selected: s.mathMode === 'challenge' }, '도전 기록만'))),
+    el('p.field-hint', '수학을 "했다"로 보는 기준: 그날 분수 연산 마스터에 접속해서 화면을 켰거나, 연습·도전을 시작했으면(중간에 그만둬도) 했다고 봐요.'),
     el('label.field', el('span.field-label', `등교 안 하는 날 (${offDays.length}일)`),
       el('textarea.input', {
         rows: 6, value: s.offDaysText,
@@ -175,6 +173,18 @@ function settingsSection(ctx) {
         on: { input: (e) => { s.mathExcludeText = e.target.value; touch(); } },
       }),
       el('span.field-hint', '분수 연산 마스터에 적힌 이름과 똑같이 적어 주세요. 마지막 단계(L27)를 통과한 학생은 따로 적지 않아도 자동으로 빠져요.')),
+    el('label.field', el('span.field-label', '누적 세기 시작일'),
+      el('input.input', {
+        value: s.mathCountStart, placeholder: '2026-10-08', inputmode: 'numeric',
+        on: { input: (e) => { s.mathCountStart = e.target.value; touch(); } },
+      }),
+      el('span.field-hint', '이 날부터 등교일마다 수학을 안 한 날을 학생별로 세어요. (연속이 아니라 합계)')),
+    el('label.field', el('span.field-label', '벌 기준 횟수'),
+      el('input.input', {
+        type: 'number', min: 1, max: 30, value: String(s.mathLimit), inputmode: 'numeric',
+        on: { input: (e) => { s.mathLimit = e.target.value; touch(); } },
+      }),
+      el('span.field-hint', '누적이 이 횟수 이상이면 수학 확인 화면 아래에 크게 따로 보여요. 벌을 받으면 그 화면에서 "해제"를 누르면 0부터 다시 세요.')),
     el('div.row-actions',
       draft.settingsDirty ? el('button.btn', { type: 'button', on: { click: () => { draft.settingsDirty = false; ctx.rerender(); } } }, '고친 것 취소') : null,
       el('button.btn.primary', { type: 'button', on: { click: save } }, '설정 저장')));

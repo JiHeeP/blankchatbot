@@ -1,6 +1,7 @@
 // Firestore 저장소
 // 구조 (모두 rooms/{room} 아래)
-//   rooms/{room}                    { className, mathCode, mathMode, offDaysText, mathExcludeText, roster: [{id,no,name}] }
+//   rooms/{room}                    { className, mathCode, offDaysText, mathExcludeText, roster: [{id,no,name}],
+//                                     mathCountStart, mathLimit, mathCleared: { 번호: 'YYYY-MM-DD'(그 날까지 해제) } }
 //   rooms/{room}/assignments/{id}   { title, createdAt, closedAt?, done: { 학생id: 완료시각 } }
 //                                   closedAt 이 있으면 '저장한 기록'(지난 과제)
 //   rooms/{room}/draws/{id}         { title, min, max, createdAt, picks: { 번호: {sid,no,name,at} }, byStudent: { 학생id: 번호 } }
@@ -10,11 +11,12 @@
 
 import {
   AppError, cleanText, newId, normalizeRoster, chooseNumber, validateDraw, validateMathCode,
+  validateCountStart, validateLimit,
 } from './lib/model.js';
 import {
-  buildReport, MathError, MathPracticeClient, DEFAULT_EXCLUDE_TEXT, parseNames,
+  buildReport, MathError, MathPracticeClient, DEFAULT_EXCLUDE_TEXT, DEFAULT_COUNT_START, DEFAULT_LIMIT, parseNames,
 } from './lib/mathpractice.js';
-import { parseOffDays, todayKST } from './lib/schoolday.js';
+import { parseDate, parseOffDays, todayKST } from './lib/schoolday.js';
 
 const MATH_FRESH_MS = 10 * 60 * 1000;
 const MATH_REFRESH_MIN_MS = 60 * 1000;
@@ -26,6 +28,7 @@ export function createStore(fs, db, room = 'main') {
   const asgCol = fs.collection(roomRef, 'assignments');
   const drawCol = fs.collection(roomRef, 'draws');
   const mathRef = fs.doc(roomRef, 'cache', 'math');
+  const daysRef = fs.doc(roomRef, 'cache', 'mathDays');
   const asgRef = (id) => fs.doc(asgCol, id);
   const drawRef = (id) => fs.doc(drawCol, id);
 
@@ -33,10 +36,12 @@ export function createStore(fs, db, room = 'main') {
     return {
       className: data.className || '',
       mathCode: data.mathCode || '',
-      mathMode: data.mathMode === 'challenge' ? 'challenge' : 'any',
       offDaysText: data.offDaysText || '',
       // 한 번도 저장한 적이 없으면 기본 제외 명단
       mathExcludeText: typeof data.mathExcludeText === 'string' ? data.mathExcludeText : DEFAULT_EXCLUDE_TEXT,
+      mathCountStart: parseDate(data.mathCountStart) || DEFAULT_COUNT_START,
+      mathLimit: Number.isInteger(data.mathLimit) && data.mathLimit >= 1 ? data.mathLimit : DEFAULT_LIMIT,
+      mathCleared: data.mathCleared && typeof data.mathCleared === 'object' ? { ...data.mathCleared } : {},
       roster: Array.isArray(data.roster) ? data.roster : [],
     };
   }
@@ -122,9 +127,10 @@ export function createStore(fs, db, room = 'main') {
     const data = {};
     if ('className' in patch) data.className = cleanText(patch.className, 30);
     if ('mathCode' in patch) data.mathCode = validateMathCode(patch.mathCode);
-    if ('mathMode' in patch) data.mathMode = patch.mathMode === 'challenge' ? 'challenge' : 'any';
     if ('offDaysText' in patch) data.offDaysText = String(patch.offDaysText || '').slice(0, 5000);
     if ('mathExcludeText' in patch) data.mathExcludeText = String(patch.mathExcludeText || '').slice(0, 2000);
+    if ('mathCountStart' in patch) data.mathCountStart = validateCountStart(patch.mathCountStart);
+    if ('mathLimit' in patch) data.mathLimit = validateLimit(patch.mathLimit);
     await fs.setDoc(roomRef, { ...data, updatedAt: fs.serverTimestamp() }, { merge: true });
   }
 
@@ -233,9 +239,38 @@ export function createStore(fs, db, room = 'main') {
    * 이전 등교일에 수학 안 한 학생. 10분 동안은 rooms/{room}/cache/math 를 같이 써서
    * 칠판·PC·폰이 각자 분수 연산 마스터를 부르지 않게 한다 (그쪽 무료 한도 절약).
    */
+  /**
+   * 누적 '해제': dateKey(그 화면의 이전 등교일)까지의 횟수를 지우고, 다음 등교일부터 0에서 다시 센다.
+   * 학생마다 따로 저장해서 여러 학생을 동시에 해제해도 서로 안 덮어쓴다.
+   */
+  function clearMathCount(no, dateKey) {
+    return fs.setDoc(roomRef, { mathCleared: { [String(no)]: dateKey }, updatedAt: fs.serverTimestamp() }, { merge: true });
+  }
+
+  /** 지난 날짜별 '그날 한 학생 번호'를 한 문서에 모아 둔다 (그날은 끝났으니 다시 안 바뀜) */
+  const dayCache = {
+    async load(code) {
+      try {
+        const snap = await fs.getDoc(daysRef);
+        const d = snap.exists() ? snap.data() : null;
+        return d && d.classCode === code ? JSON.parse(d.daysJson || '{}') : {};
+      } catch {
+        return {};
+      }
+    },
+    async save(code, all) {
+      try {
+        await fs.setDoc(daysRef, { classCode: code, daysJson: JSON.stringify(all), savedAt: Date.now() });
+      } catch {
+        // 저장 못 해도 다음에 다시 계산하면 돼서 계속 진행
+      }
+    },
+  };
+
   async function getMath(room, { refresh = false, fetchImpl, base, at = new Date() } = {}) {
     if (!room.mathCode) throw new AppError('nocode', '우리 반 탭에서 수학 반 코드를 먼저 적어 주세요');
-    const sig = [room.mathCode, room.mathMode, room.offDaysText, room.mathExcludeText, todayKST(at)].join('|');
+    const sig = [room.mathCode, room.offDaysText, room.mathExcludeText, room.mathCountStart, room.mathLimit,
+      JSON.stringify(room.mathCleared || {}), todayKST(at)].join('|');
 
     let cached = null;
     try {
@@ -252,10 +287,13 @@ export function createStore(fs, db, room = 'main') {
     try {
       const report = await buildReport({
         classCode: room.mathCode,
-        mode: room.mathMode,
         offDays: parseOffDays(room.offDaysText),
         roster: room.roster,
         excludeNames: parseNames(room.mathExcludeText),
+        countStart: room.mathCountStart,
+        limit: room.mathLimit,
+        cleared: room.mathCleared || {},
+        dayCache,
         now: at,
         fetchImpl,
         base,
@@ -309,9 +347,11 @@ export function createStore(fs, db, room = 'main') {
     batch.set(roomRef, {
       className: cleanText(r.className, 30),
       mathCode: validateMathCode(r.mathCode),
-      mathMode: r.mathMode === 'challenge' ? 'challenge' : 'any',
       offDaysText: String(r.offDaysText || ''),
       mathExcludeText: typeof r.mathExcludeText === 'string' ? r.mathExcludeText : DEFAULT_EXCLUDE_TEXT,
+      mathCountStart: parseDate(r.mathCountStart) || DEFAULT_COUNT_START,
+      mathLimit: Number.isInteger(r.mathLimit) && r.mathLimit >= 1 ? r.mathLimit : DEFAULT_LIMIT,
+      mathCleared: r.mathCleared && typeof r.mathCleared === 'object' ? r.mathCleared : {},
       roster,
       updatedAt: fs.serverTimestamp(),
     });
@@ -354,6 +394,7 @@ export function createStore(fs, db, room = 'main') {
     pick,
     cancelPick,
     getMath,
+    clearMathCount,
     mathStudents,
     exportAll,
     importAll,

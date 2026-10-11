@@ -12,8 +12,44 @@ import { renderSetup } from './views/setup.js';
 const VIEWS = { check: checkView, draw: drawView, math: mathView, class: classView };
 const DEFAULT_TAB = 'check';
 // ?popup=1 : 학교 PC 바탕화면 팝업용. 메뉴 없이 수학 확인 화면만 작게 보여 준다.
+//   &pos=tr|br|tl|bl|c  창 위치(오른쪽 위·오른쪽 아래·왼쪽 위·왼쪽 아래·가운데, 기본 tr)
+//   &w=560&h=520        창 크기
 const POPUP = new URLSearchParams(location.search).has('popup');
-if (POPUP) document.body.classList.add('popup');
+if (POPUP) {
+  document.body.classList.add('popup');
+  placePopupWindow();
+}
+
+/**
+ * 팝업 창을 늘 같은 자리에 둔다. 브라우저는 앱 창의 마지막 위치를 기억해서 flag 만으로는 자리가 달라질 수
+ * 있어서, 화면이 직접 작업 영역(작업 표시줄 제외) 기준 모서리로 옮긴다.
+ */
+function placePopupWindow() {
+  const q = new URLSearchParams(location.search);
+  const pos = ['tr', 'br', 'tl', 'bl', 'c'].includes(q.get('pos')) ? q.get('pos') : 'tr';
+  const w = Number(q.get('w')) || 560;
+  const h = Number(q.get('h')) || 620;
+  const margin = 16;
+  const apply = () => {
+    try {
+      window.resizeTo(w, h);
+      const left = screen.availLeft || 0;
+      const top = screen.availTop || 0;
+      const ow = window.outerWidth || w;
+      const oh = window.outerHeight || h;
+      const x = pos === 'c' ? left + (screen.availWidth - ow) / 2
+        : pos.includes('l') ? left + margin : left + screen.availWidth - ow - margin;
+      const y = pos === 'c' ? top + (screen.availHeight - oh) / 2
+        : pos.startsWith('b') ? top + screen.availHeight - oh - margin : top + margin;
+      window.moveTo(Math.round(x), Math.round(y));
+    } catch {
+      // 옮길 수 없는 창이면 브라우저가 정한 자리에 그대로 둔다
+    }
+  };
+  apply();
+  setTimeout(apply, 400); // 창이 다 뜬 뒤 한 번 더 (브라우저가 기억한 자리를 덮어씀)
+  setTimeout(apply, 1500);
+}
 
 const viewRoot = document.getElementById('view');
 const banner = document.getElementById('banner');

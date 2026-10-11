@@ -10,8 +10,10 @@
 // 공개 저장소의 Actions 로그에는 학생 이름을 남기지 않는다 (CI 에서는 인원 수만 출력).
 
 import crypto from 'node:crypto';
-import { buildReport, decodeValue, DEFAULT_EXCLUDE_TEXT, parseNames } from '../public/js/lib/mathpractice.js';
-import { parseOffDays } from '../public/js/lib/schoolday.js';
+import {
+  buildReport, decodeValue, DEFAULT_EXCLUDE_TEXT, DEFAULT_COUNT_START, DEFAULT_LIMIT, parseNames,
+} from '../public/js/lib/mathpractice.js';
+import { parseDate, parseOffDays } from '../public/js/lib/schoolday.js';
 
 const KAUTH = 'https://kauth.kakao.com';
 const KAPI = 'https://kapi.kakao.com';
@@ -25,12 +27,26 @@ const TEXT_LIMIT = 200; // 카카오 텍스트 메시지 글자 수 (문서에 �
 export function buildMessage(report, { className = '', maxLen = TEXT_LIMIT } = {}) {
   const head = `${className ? `${className} ` : ''}수학 안 한 사람 · ${report.dateLabel}`;
   const foot = `(${report.total}명 중 ${report.done}명 함)`;
-  if (!report.missing.length) return `${head}\n모두 했어요! 🎉\n${foot}`;
+  const missing = report.missing.map((s) => `${s.no}번 ${s.name}`);
+  const over = (report.overLimit || []).map((s) => `${s.no}번 ${s.name}(${s.count}회)`);
 
-  const items = report.missing.map((s) => `${s.no}번 ${s.name}`);
-  const build = (list, rest) => `${head}\n${list.join(', ')}${rest ? ` 외 ${rest}명` : ''}\n${foot}`;
-  let text = build(items, 0);
-  for (let n = items.length - 1; text.length > maxLen && n >= 1; n--) text = build(items.slice(0, n), items.length - n);
+  const list = (items, n) => items.slice(0, n).join(', ') + (n < items.length ? ` 외 ${items.length - n}명` : '');
+  const compose = (m, o) => [
+    head,
+    missing.length ? list(missing, m) : '모두 했어요! 🎉',
+    over.length ? `⚠ 누적 ${report.limit}회 이상: ${list(over, o)}` : '',
+    foot,
+  ].filter(Boolean).join('\n');
+
+  // 글자 수가 넘으면 이름이 더 많은 쪽부터 줄인다 (누적 학생은 최대한 남김)
+  let m = missing.length;
+  let o = over.length;
+  let text = compose(m, o);
+  while (text.length > maxLen && (m > 1 || o > 1)) {
+    if (m > 1 && (m > o || o <= 1)) m -= 1;
+    else o -= 1;
+    text = compose(m, o);
+  }
   return text;
 }
 
@@ -69,10 +85,35 @@ export async function readRoom(config, room, fetchImpl) {
   return {
     className: d.className || '',
     mathCode: d.mathCode || '',
-    mathMode: d.mathMode === 'challenge' ? 'challenge' : 'any',
     offDaysText: d.offDaysText || '',
     mathExcludeText: typeof d.mathExcludeText === 'string' ? d.mathExcludeText : DEFAULT_EXCLUDE_TEXT,
+    mathCountStart: parseDate(d.mathCountStart) || DEFAULT_COUNT_START,
+    mathLimit: Number.isInteger(d.mathLimit) && d.mathLimit >= 1 ? d.mathLimit : DEFAULT_LIMIT,
+    mathCleared: d.mathCleared && typeof d.mathCleared === 'object' ? d.mathCleared : {},
     roster: Array.isArray(d.roster) ? d.roster : [],
+  };
+}
+
+/** 지난 날짜별 '그날 한 학생'을 사이트와 같은 문서(rooms/{room}/cache/mathDays)에 보관한다 */
+function makeDayCache(config, room, fetchImpl, readOnly) {
+  const path = `rooms/${encodeURIComponent(room)}/cache/mathDays`;
+  return {
+    async load(code) {
+      try {
+        const d = await fsGet(config, path, fetchImpl);
+        return d && d.classCode === code ? JSON.parse(d.daysJson || '{}') : {};
+      } catch {
+        return {};
+      }
+    },
+    async save(code, all) {
+      if (readOnly) return;
+      try {
+        await fsSet(config, path, { classCode: code, daysJson: JSON.stringify(all), savedAt: Date.now() }, fetchImpl);
+      } catch {
+        // 저장 못 해도 다음에 다시 계산하면 돼요
+      }
+    },
   };
 }
 
@@ -176,10 +217,13 @@ export async function runNotify({
 
   const report = await buildReport({
     classCode: roomData.mathCode,
-    mode: roomData.mathMode,
     offDays: parseOffDays(roomData.offDaysText),
     roster: roomData.roster,
     excludeNames: parseNames(roomData.mathExcludeText),
+    countStart: roomData.mathCountStart,
+    limit: roomData.mathLimit,
+    cleared: roomData.mathCleared,
+    dayCache: makeDayCache(config, room, fetchImpl, dryRun), // 연습 실행은 저장하지 않음
     now,
     fetchImpl,
   });

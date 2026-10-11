@@ -98,6 +98,15 @@ export class SchoolCalendar {
     return null;
   }
 
+  /** startKey 부터 endKey 까지(둘 다 포함) 등교일 목록. 너무 길면 가장 최근 maxDays 개만. */
+  daysBetween(startKey, endKey, maxDays = 250) {
+    const out = [];
+    for (let d = startKey; d <= endKey && out.length < 2000; d = addDays(d, 1)) {
+      if (this.isSchoolDay(d)) out.push(d);
+    }
+    return out.slice(-maxDays);
+  }
+
   /** 등교하지 않는 이유. 등교일이면 ''. */
   whyOff(key) {
     const wd = weekday(key);

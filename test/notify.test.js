@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildMessage, encryptToken, decryptToken, pickRefreshToken, runNotify,
 } from '../scripts/notify-lib.mjs';
-import { fakeFirestoreFetch, sampleDb, SAMPLE_NAMES } from './fake-firestore.js';
+import { fakeFirestoreFetch, sampleDb, weekDb, SAMPLE_NAMES } from './fake-firestore.js';
 
 const CONFIG = { projectId: 'demo-class', apiKey: 'demo' };
 // 한국 시간 2026-10-12(월) 08:30 → 이전 등교일 10/8(목) (10/9 한글날, 주말)
@@ -17,7 +17,7 @@ function roomDoc(extra = {}) {
   }));
   return {
     fields: {
-      className: sv('5학년 4반'), mathCode: sv('TEST01'), mathMode: sv('any'),
+      className: sv('5학년 4반'), mathCode: sv('TEST01'),
       offDaysText: sv(''), mathExcludeText: sv('테스트'), roster: { arrayValue: { values: roster } },
       ...extra,
     },
@@ -25,8 +25,8 @@ function roomDoc(extra = {}) {
 }
 
 /** 우리 반 Firestore, 분수 연산 마스터, 카카오(인증·메시지)를 한 번에 흉내 내는 fetch */
-function world({ refreshResponse, kakaoFail } = {}) {
-  const math = fakeFirestoreFetch(sampleDb('2026-10-08'));
+function world({ refreshResponse, kakaoFail, db } = {}) {
+  const math = fakeFirestoreFetch(db || sampleDb('2026-10-08'));
   const store = new Map(); // 우리 반 Firestore 문서
   store.set('rooms/main', roomDoc());
   const sent = [];
@@ -162,3 +162,49 @@ test('수학 반 코드가 없으면 건너뜀', async () => {
   assert.equal(r.status, 'skipped');
   assert.equal(w.sent.length, 0);
 });
+
+test('메시지: 누적 기준 이상 학생 줄 (이름이 많으면 줄여도 누적 학생은 남김)', () => {
+  const report = {
+    dateLabel: '10/15 (목)', total: 17, done: 14, limit: 3,
+    missing: [{ no: '3', name: '박도윤' }, { no: '5', name: '정시우' }],
+    overLimit: [{ no: '3', name: '박도윤', count: 5 }, { no: '5', name: '정시우', count: 3 }],
+  };
+  assert.equal(buildMessage(report, { className: '5학년 4반' }),
+    '5학년 4반 수학 안 한 사람 · 10/15 (목)\n3번 박도윤, 5번 정시우\n⚠ 누적 3회 이상: 3번 박도윤(5회), 5번 정시우(3회)\n(17명 중 14명 함)');
+
+  const many = Array.from({ length: 18 }, (_, i) => ({ no: String(i + 1), name: `학생이름${i + 1}` }));
+  const text = buildMessage({ ...report, total: 18, done: 0, missing: many, overLimit: many.slice(0, 2).map((s) => ({ ...s, count: 4 })) });
+  assert.ok(text.length <= 200, `길이 ${text.length}`);
+  assert.match(text, /⚠ 누적 3회 이상: 1번 학생이름1\(4회\), 2번 학생이름2\(4회\)/);
+});
+
+test('누적 기준 이상 학생이 카카오톡에 들어가고, 지난 날짜는 저장해서 다음에 다시 안 부름', async () => {
+  const misses = { 3: WEEK_DAYS_ALL(), 5: ['2026-10-12', '2026-10-13', '2026-10-14'] };
+  const w = world({ db: weekDb(misses) });
+  w.store.set('rooms/main', roomDoc({ mathExcludeText: sv('테스트') }));
+  const FRI = new Date('2026-10-15T23:30:00Z'); // 한국 시간 10/16(금) 08:30 → 이전 등교일 10/15
+  const r = await runNotify({ config: CONFIG, env: ENV, now: FRI, fetchImpl: w.fetchImpl });
+  assert.equal(r.status, 'sent');
+  assert.match(w.sent[0].template.text, /⚠ 누적 3회 이상: 3번 박도윤\(5회\), 5번 정시우\(3회\)/);
+  const days = JSON.parse(w.store.get('rooms/main/cache/mathDays').fields.daysJson.stringValue);
+  assert.deepEqual(Object.keys(days).sort(), ['2026-10-08', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15']);
+});
+
+test('연습 실행은 지난 날짜를 저장하지 않음', async () => {
+  const w = world({ db: weekDb({}) });
+  const FRI = new Date('2026-10-15T23:30:00Z');
+  await runNotify({ config: CONFIG, env: {}, dryRun: true, now: FRI, fetchImpl: w.fetchImpl });
+  assert.equal(w.store.has('rooms/main/cache/mathDays'), false);
+});
+
+test('해제한 학생은 그날까지의 횟수가 빠짐', async () => {
+  const w = world({ db: weekDb({ 3: WEEK_DAYS_ALL() }) });
+  w.store.set('rooms/main', roomDoc({ mathExcludeText: sv('테스트'), mathCleared: { mapValue: { fields: { 3: sv('2026-10-13') } } } }));
+  const FRI = new Date('2026-10-15T23:30:00Z');
+  const r = await runNotify({ config: CONFIG, env: {}, dryRun: true, now: FRI, fetchImpl: w.fetchImpl });
+  assert.doesNotMatch(r.text, /누적/, '10/14, 10/15 두 번뿐이라 기준(3) 미만');
+});
+
+function WEEK_DAYS_ALL() {
+  return ['2026-10-08', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15'];
+}
