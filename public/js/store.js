@@ -1,7 +1,8 @@
 // Firestore 저장소
 // 구조 (모두 rooms/{room} 아래)
-//   rooms/{room}                    { className, mathCode, mathMode, offDaysText, roster: [{id,no,name}] }
-//   rooms/{room}/assignments/{id}   { title, createdAt, done: { 학생id: 완료시각 } }
+//   rooms/{room}                    { className, mathCode, mathMode, offDaysText, mathExcludeText, roster: [{id,no,name}] }
+//   rooms/{room}/assignments/{id}   { title, createdAt, closedAt?, done: { 학생id: 완료시각 } }
+//                                   closedAt 이 있으면 '저장한 기록'(지난 과제)
 //   rooms/{room}/draws/{id}         { title, min, max, createdAt, picks: { 번호: {sid,no,name,at} }, byStudent: { 학생id: 번호 } }
 //   rooms/{room}/cache/math         { sig, savedAt, report }   — 수학 결과 공유 캐시
 //
@@ -10,7 +11,9 @@
 import {
   AppError, cleanText, newId, normalizeRoster, chooseNumber, validateDraw, validateMathCode,
 } from './lib/model.js';
-import { buildReport, MathError, MathPracticeClient } from './lib/mathpractice.js';
+import {
+  buildReport, MathError, MathPracticeClient, DEFAULT_EXCLUDE_TEXT, parseNames,
+} from './lib/mathpractice.js';
 import { parseOffDays, todayKST } from './lib/schoolday.js';
 
 const MATH_FRESH_MS = 10 * 60 * 1000;
@@ -32,6 +35,8 @@ export function createStore(fs, db, room = 'main') {
       mathCode: data.mathCode || '',
       mathMode: data.mathMode === 'challenge' ? 'challenge' : 'any',
       offDaysText: data.offDaysText || '',
+      // 한 번도 저장한 적이 없으면 기본 제외 명단
+      mathExcludeText: typeof data.mathExcludeText === 'string' ? data.mathExcludeText : DEFAULT_EXCLUDE_TEXT,
       roster: Array.isArray(data.roster) ? data.roster : [],
     };
   }
@@ -40,7 +45,9 @@ export function createStore(fs, db, room = 'main') {
     const d = snap.data({ serverTimestamps: 'estimate' });
     const done = {};
     for (const [sid, at] of Object.entries(d.done || {})) done[sid] = tsToISO(at);
-    return { id: snap.id, title: d.title || '', createdAt: tsToISO(d.createdAt) || '', done };
+    return {
+      id: snap.id, title: d.title || '', createdAt: tsToISO(d.createdAt) || '', closedAt: tsToISO(d.closedAt), done,
+    };
   }
 
   function readDraw(snap) {
@@ -117,6 +124,7 @@ export function createStore(fs, db, room = 'main') {
     if ('mathCode' in patch) data.mathCode = validateMathCode(patch.mathCode);
     if ('mathMode' in patch) data.mathMode = patch.mathMode === 'challenge' ? 'challenge' : 'any';
     if ('offDaysText' in patch) data.offDaysText = String(patch.offDaysText || '').slice(0, 5000);
+    if ('mathExcludeText' in patch) data.mathExcludeText = String(patch.mathExcludeText || '').slice(0, 2000);
     await fs.setDoc(roomRef, { ...data, updatedAt: fs.serverTimestamp() }, { merge: true });
   }
 
@@ -148,6 +156,15 @@ export function createStore(fs, db, room = 'main') {
 
   function resetAssignment(id) {
     return fs.updateDoc(asgRef(id), { done: {} });
+  }
+
+  /** 과제를 '저장'(마감)해서 지난 기록으로 보낸다. 체크는 그대로 남고 나중에 고칠 수도 있다. */
+  function closeAssignment(id) {
+    return fs.updateDoc(asgRef(id), { closedAt: fs.serverTimestamp() });
+  }
+
+  function reopenAssignment(id) {
+    return fs.updateDoc(asgRef(id), { closedAt: fs.deleteField() });
   }
 
   // -- 번호 뽑기 -------------------------------------------------------------
@@ -218,7 +235,7 @@ export function createStore(fs, db, room = 'main') {
    */
   async function getMath(room, { refresh = false, fetchImpl, base, at = new Date() } = {}) {
     if (!room.mathCode) throw new AppError('nocode', '우리 반 탭에서 수학 반 코드를 먼저 적어 주세요');
-    const sig = [room.mathCode, room.mathMode, room.offDaysText, todayKST(at)].join('|');
+    const sig = [room.mathCode, room.mathMode, room.offDaysText, room.mathExcludeText, todayKST(at)].join('|');
 
     let cached = null;
     try {
@@ -238,6 +255,7 @@ export function createStore(fs, db, room = 'main') {
         mode: room.mathMode,
         offDays: parseOffDays(room.offDaysText),
         roster: room.roster,
+        excludeNames: parseNames(room.mathExcludeText),
         now: at,
         fetchImpl,
         base,
@@ -293,12 +311,15 @@ export function createStore(fs, db, room = 'main') {
       mathCode: validateMathCode(r.mathCode),
       mathMode: r.mathMode === 'challenge' ? 'challenge' : 'any',
       offDaysText: String(r.offDaysText || ''),
+      mathExcludeText: typeof r.mathExcludeText === 'string' ? r.mathExcludeText : DEFAULT_EXCLUDE_TEXT,
       roster,
       updatedAt: fs.serverTimestamp(),
     });
     for (const a of data.assignments || []) {
       if (!a?.id || !a.title) continue;
-      batch.set(asgRef(a.id), { title: cleanText(a.title), createdAt: a.createdAt || new Date().toISOString(), done: a.done || {} });
+      const asg = { title: cleanText(a.title), createdAt: a.createdAt || new Date().toISOString(), done: a.done || {} };
+      if (a.closedAt) asg.closedAt = a.closedAt;
+      batch.set(asgRef(a.id), asg);
     }
     for (const d of data.draws || []) {
       if (!d?.id || !d.title) continue;
@@ -324,6 +345,8 @@ export function createStore(fs, db, room = 'main') {
     deleteAssignment,
     setDone,
     resetAssignment,
+    closeAssignment,
+    reopenAssignment,
     createDraw,
     renameDraw,
     deleteDraw,

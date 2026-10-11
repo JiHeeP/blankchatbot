@@ -147,7 +147,9 @@ async function main() {
   await page.getByRole('link', { name: '수학 확인' }).click();
   await page.locator('.name-chip').first().waitFor({ timeout: 10000 });
   const names = await page.locator('.name-chip').allTextContents();
-  assert(names.length === 3 && names.join(',').includes('박도윤'), `안 한 학생 3명: ${names.join(', ')}`);
+  assert(names.length === 2 && names.join(',').includes('박도윤'), `안 한 학생 2명: ${names.join(', ')}`);
+  const skip = await page.locator('.math-notes', { hasText: '세지 않음' }).textContent();
+  assert(skip.includes('오수아') && skip.includes('테스트'), `L27 통과·제외 학생은 빠짐 (${skip.trim()})`);
   await shot(page, '03-math');
 
   console.log('오프라인');
@@ -165,6 +167,38 @@ async function main() {
   await p2.locator('.chip', { hasText: '수학 익힘책 34쪽' }).click();
   await p2.locator('.count strong', { hasText: '6' }).waitFor({ timeout: 30000 });
   assert(true, '다시 연결되면 다른 기기에 반영');
+
+  console.log('과제 저장 · 지난 기록');
+  await page.locator('.chip', { hasText: '수학 익힘책 34쪽' }).click();
+  await page.getByRole('button', { name: '💾 저장하고 새 과제' }).click();
+  await page.getByLabel('과제 이름').fill('일기 쓰기');
+  await page.getByRole('button', { name: '만들기', exact: true }).click();
+  await page.locator('.page-title', { hasText: '일기 쓰기' }).waitFor();
+  assert(await page.locator('.chip', { hasText: '수학 익힘책 34쪽' }).count() === 0, '저장한 과제는 체크 화면에서 빠지고 새 과제가 열림');
+  await shot(page, '01-check-after-save');
+  await page.getByRole('button', { name: /지난 기록/ }).click();
+  await page.locator('.record-card', { hasText: '수학 익힘책 34쪽' }).waitFor();
+  await shot(page, '01-records');
+  await page.locator('.record-card', { hasText: '수학 익힘책 34쪽' }).click();
+  assert(await page.locator('.tile.done').count() === 6, '지난 기록에 체크 6개 그대로');
+  await page.locator('.tile-grid .tile').nth(16).click();
+  await page.locator('.count strong', { hasText: '7' }).waitFor();
+  assert(true, '저장한 기록에서도 늦게 낸 학생 체크');
+  await shot(page, '01-record-detail');
+  await page.getByRole('button', { name: '다시 열기' }).click();
+  await page.locator('.save-btn').waitFor();
+  assert(await page.locator('.chip', { hasText: '수학 익힘책 34쪽' }).count() === 1, '다시 열면 체크 화면으로 돌아옴');
+
+  console.log('학교 PC 팝업 (?popup=1)');
+  const pop = await board.newPage();
+  await pop.setViewportSize({ width: 560, height: 760 });
+  await pop.goto(`${SITE}/?emulator=${EMU}&room=${ROOM}&popup=1`);
+  await pop.locator('.name-chip').first().waitFor({ timeout: 10000 });
+  assert(await pop.locator('.tabs').isHidden(), '팝업에는 메뉴 탭이 없음');
+  const popNames = await pop.locator('.name-chip').allTextContents();
+  assert(popNames.length === 2 && popNames.join(',').includes('조하준'), `팝업에 안 한 학생 2명: ${popNames.join(', ')}`);
+  await shot(pop, '05-popup');
+  await pop.close();
 
   assert(errors.filter((e) => !/offline|ERR_INTERNET_DISCONNECTED|Could not reach Cloud Firestore/i.test(e)).length === 0,
     `페이지 오류 없음 ${errors.length ? `(무시한 오프라인 오류 ${errors.length}건)` : ''}`);

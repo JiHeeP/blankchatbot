@@ -14,7 +14,8 @@ const m = {
 };
 
 function signature(room) {
-  return [room.mathCode, room.mathMode, room.offDaysText, room.roster.map((s) => `${s.no}:${s.name}`).join(',')].join('|');
+  return [room.mathCode, room.mathMode, room.offDaysText, room.mathExcludeText,
+    room.roster.map((s) => `${s.no}:${s.name}`).join(',')].join('|');
 }
 
 async function load(ctx, refresh = false) {
@@ -48,7 +49,9 @@ export function render(root, ctx, { changedTab } = {}) {
     root.replaceChildren(el('div.empty',
       el('p.empty-big', '수학 반 코드가 아직 없어요'),
       el('p', '분수 연산 마스터 교사 화면 위쪽에 있는 반 코드(6글자)를 우리 반 탭에 적어 주세요.'),
-      onTap(el('button.btn.primary.btn-xl', { type: 'button' }, '우리 반 탭으로'), () => ctx.go('class'))));
+      document.body.classList.contains('popup')
+        ? null
+        : onTap(el('button.btn.primary.btn-xl', { type: 'button' }, '우리 반 탭으로'), () => ctx.go('class'))));
     return;
   }
 
@@ -90,12 +93,17 @@ export function render(root, ctx, { changedTab } = {}) {
     ? el('p.warn', `최신 기록을 못 받아서 ${r.fetchedDate?.slice(5).replace('-', '/')} ${r.fetchedAt}에 받은 내용을 보여 주고 있어요. (${r.error?.message || ''})`)
     : null;
   const offNote = r.todayOff ? el('p.muted', `오늘은 ${r.todayOff}이라 지난 등교일 ${r.dateLabel} 기준이에요.`) : null;
+  const skipped = [
+    r.graduated?.length ? `마지막 단계(${r.finalLevel}) 통과 ${r.graduated.length}명: ${r.graduated.map((s) => s.name).join(', ')}` : '',
+    r.excluded?.length ? `항상 제외: ${r.excluded.map((s) => s.name).join(', ')}` : '',
+  ].filter(Boolean);
+  const skipNote = skipped.length ? el('p.muted.math-notes', `세지 않음 — ${skipped.join(' · ')}`) : null;
 
   root.replaceChildren(el('div.page',
     el('div.page-head', title, refreshBtn),
     el('div.card.math-card', names),
     el('p.muted.math-notes', notes.join(' · ')),
-    warn, offNote,
+    skipNote, warn, offNote,
     el('p.muted.small', '설날·추석·재량휴업일처럼 해마다 바뀌는 쉬는 날은 우리 반 탭의 "등교 안 하는 날"에 적어 주세요.')));
 }
 

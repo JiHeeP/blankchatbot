@@ -138,6 +138,7 @@ function settingsSection(ctx) {
     try {
       await ctx.store.saveSettings({
         className: s.className, mathCode: s.mathCode, mathMode: s.mathMode, offDaysText: s.offDaysText,
+        mathExcludeText: s.mathExcludeText,
       });
       draft.settingsDirty = false;
       toast('설정을 저장했어요', 'ok');
@@ -168,6 +169,12 @@ function settingsSection(ctx) {
         on: { input: (e) => { s.offDaysText = e.target.value; touch(); } },
       }),
       el('span.field-hint', '주말과 공휴일(대체공휴일 포함)은 자동으로 빠져요. 설날·추석·재량휴업일·방학만 적으세요.')),
+    el('label.field', el('span.field-label', '수학 확인에서 항상 뺄 이름'),
+      el('textarea.input', {
+        rows: 3, value: s.mathExcludeText, placeholder: '한 줄에 한 명\n전지현\n테스트',
+        on: { input: (e) => { s.mathExcludeText = e.target.value; touch(); } },
+      }),
+      el('span.field-hint', '분수 연산 마스터에 적힌 이름과 똑같이 적어 주세요. 마지막 단계(L27)를 통과한 학생은 따로 적지 않아도 자동으로 빠져요.')),
     el('div.row-actions',
       draft.settingsDirty ? el('button.btn', { type: 'button', on: { click: () => { draft.settingsDirty = false; ctx.rerender(); } } }, '고친 것 취소') : null,
       el('button.btn.primary', { type: 'button', on: { click: save } }, '설정 저장')));
@@ -188,7 +195,8 @@ function backupSection(ctx) {
     const students = sortByNo(ctx.state.room.roster);
     const asgs = ctx.state.assignments;
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const lines = [['번호', '이름', ...asgs.map((a) => a.title)].map(esc).join(',')];
+    const head = (a) => `${a.title}${a.closedAt ? ` (${new Date(a.closedAt).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' })})` : ''}`;
+    const lines = [['번호', '이름', ...asgs.map(head)].map(esc).join(',')];
     for (const s of students) lines.push([s.no, s.name, ...asgs.map((a) => (a.done[s.id] ? 'O' : ''))].map(esc).join(','));
     const blob = new Blob([`﻿${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
     const a = el('a', { href: URL.createObjectURL(blob), download: `과제체크-${new Date().toISOString().slice(0, 10)}.csv` });

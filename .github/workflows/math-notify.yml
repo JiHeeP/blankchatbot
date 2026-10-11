@@ -1,0 +1,51 @@
+# 평일 아침 8:30(한국 시간)에 수학 안 한 학생을 카카오톡 "나와의 채팅"으로 보낸다.
+# - 설정 방법은 README 의 '5. 알림 받기' 참고
+# - 이 저장소는 공개라서 실행 기록에 학생 이름은 남기지 않는다 (인원 수만 출력)
+# - 수동으로 시험하려면: 저장소 Actions 탭 → 이 워크플로 → Run workflow
+#   (dry_run 을 켜면 카카오톡은 안 보내고 확인만, force 를 켜면 주말에도 보냄)
+name: 수학 안 한 학생 카카오톡 알림
+
+on:
+  schedule:
+    # UTC 기준. 한국 시간(UTC+9)으로 월~금 08:30 = UTC 일~목 23:30
+    - cron: '30 23 * * 0-4'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '카카오톡은 보내지 않고 확인만 (연습)'
+        type: boolean
+        default: false
+      force:
+        description: '주말·공휴일이어도 보내기 (시험용)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: math-notify
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 수학 안 한 학생 확인하고 카카오톡 보내기
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          args=""
+          [ "$DRY_RUN" = "true" ] && args="$args --dry-run"
+          [ "$FORCE" = "true" ] && args="$args --force"
+          node scripts/notify-math.mjs $args

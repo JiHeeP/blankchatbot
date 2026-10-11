@@ -8,6 +8,26 @@ export const DEFAULT_PROJECT_ID = 'mathpractice-1d8f9';
 export const DEFAULT_API_KEY = 'AIzaSyD-0OnV9CfNbglUojNh1Sz-WpVzZImereY';
 const TIMEOUT_MS = 15000;
 
+// 분수 연산 마스터의 마지막 단계와 통과 점수 (mathpractice js/levels.js 기준)
+//   L27 만점 220, 허용 오답 2개 × 2점 → 216점 이상이면 '통과'(다음 단계가 열리는 점수와 같은 규칙)
+export const FINAL_LEVEL = 'L27';
+export const FINAL_PASS_SCORE = 216;
+
+// 수학 확인에서 항상 빼는 이름 (우리 반 탭에서 바꿀 수 있음)
+export const DEFAULT_EXCLUDE_TEXT = '전지현\n테스트';
+
+/** 줄·쉼표로 나뉜 이름 목록. '#' 뒤는 메모 */
+export function parseNames(text) {
+  const out = new Set();
+  for (const line of String(text || '').split(/\r?\n/)) {
+    for (const part of line.split('#')[0].split(',')) {
+      const name = part.trim();
+      if (name) out.add(name);
+    }
+  }
+  return [...out];
+}
+
 export class MathError extends Error {
   constructor(code, message, status = 502) {
     super(message);
@@ -124,6 +144,26 @@ export class MathPracticeClient {
     return sortByNo(out);
   }
 
+  /** 마지막 단계(L27) 도전에서 통과 점수를 넘은 학생 번호 Set */
+  async fetchFinalPassed() {
+    const eq = (field, value) => ({ fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: { stringValue: value } } });
+    const body = {
+      structuredQuery: {
+        from: [{ collectionId: 'results' }],
+        where: { compositeFilter: { op: 'AND', filters: [eq('level', FINAL_LEVEL), eq('mode', 'challenge')] } },
+        limit: 5000,
+      },
+    };
+    const rows = await this.call(`classes/${encodeURIComponent(this.code)}:runQuery`, { body });
+    const passed = new Set();
+    for (const row of rows || []) {
+      if (!row.document) continue;
+      const f = fields(row.document);
+      if (f.studentNo != null && Number(f.score) >= FINAL_PASS_SCORE) passed.add(String(f.studentNo));
+    }
+    return passed;
+  }
+
   /** dateKey 날짜에 기록이 있는 학생 번호 Set */
   async fetchDone(dateKey, challengeOnly = false) {
     const body = {
@@ -147,9 +187,12 @@ export class MathPracticeClient {
 
 /**
  * 이전 등교일에 수학을 하지 않은 학생 목록.
- * roster 가 있으면 번호가 같은 학생의 이름은 우리 반 명단 이름을 쓴다.
+ * - roster 가 있으면 번호가 같은 학생의 이름은 우리 반 명단 이름을 쓴다.
+ * - 마지막 단계(L27)를 통과한 학생과 excludeNames 에 있는 이름은 세지 않는다.
  */
-export async function buildReport({ classCode, mode = 'any', offDays = [], roster = [], now = new Date(), fetchImpl, base } = {}) {
+export async function buildReport({
+  classCode, mode = 'any', offDays = [], roster = [], excludeNames = [], now = new Date(), fetchImpl, base,
+} = {}) {
   if (!classCode) throw new MathError('nocode', '우리 반 탭에서 수학 반 코드를 먼저 적어 주세요', 400);
   const client = new MathPracticeClient(classCode, { fetchImpl, base });
   const cls = await client.fetchClass();
@@ -158,14 +201,24 @@ export async function buildReport({ classCode, mode = 'any', offDays = [], roste
   const prev = cal.prevSchoolDay(today);
   if (!prev) throw new MathError('http', '이전 등교일을 찾을 수 없어요');
 
-  const [students, done] = await Promise.all([
+  const [students, done, finalPassed] = await Promise.all([
     client.fetchStudents(),
     client.fetchDone(prev, mode === 'challenge'),
+    client.fetchFinalPassed(),
   ]);
   const nameByNo = new Map(roster.map((s) => [String(s.no), s.name]));
-  const missing = students
-    .filter((s) => !done.has(s.no))
-    .map((s) => ({ no: s.no, name: nameByNo.get(s.no) || s.name }));
+  const excludeSet = new Set(excludeNames.map((n) => String(n).trim()).filter(Boolean));
+  const counted = [];
+  const graduated = [];
+  const excluded = [];
+  for (const s of students) {
+    const name = nameByNo.get(s.no) || s.name;
+    const entry = { no: s.no, name };
+    if (excludeSet.has(name) || excludeSet.has(s.name)) excluded.push(entry);
+    else if (finalPassed.has(s.no)) graduated.push(entry);
+    else counted.push(entry);
+  }
+  const missing = counted.filter((s) => !done.has(s.no));
 
   return {
     classCode: client.code,
@@ -173,8 +226,11 @@ export async function buildReport({ classCode, mode = 'any', offDays = [], roste
     dateKey: prev,
     dateLabel: label(prev),
     missing,
-    done: students.length - missing.length,
-    total: students.length,
+    done: counted.length - missing.length,
+    total: counted.length,
+    graduated,
+    excluded,
+    finalLevel: FINAL_LEVEL,
     fetchedAt: timeKST(now),
     fetchedDate: today,
     todayOff: cal.whyOff(today),
