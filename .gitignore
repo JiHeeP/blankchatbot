@@ -1,4 +1,4 @@
+node_modules/
+.data/
+.vercel/
 __pycache__/
-공지판_오류.txt
-공지판_로그.txt
-수학_캐시.json

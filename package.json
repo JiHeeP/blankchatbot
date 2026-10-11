@@ -1,0 +1,14 @@
+{
+  "name": "classroom-board",
+  "private": true,
+  "version": "1.0.0",
+  "description": "우리 반 교실 관리 사이트: 과제 체크, 번호 뽑기, 수학 확인",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node dev-server.js",
+    "test": "node --test \"test/*.test.js\""
+  }
+}
