@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const SITE = process.env.SITE || 'http://localhost:3000';
 const EMU = process.env.EMU || '127.0.0.1:8080';
 const W = 560;
-const H = 520;
+const H = 620;
 const M = 16;
 
 async function main() {

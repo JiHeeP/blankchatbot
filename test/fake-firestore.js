@@ -81,6 +81,28 @@ export function fakeFirestoreFetch(db, opts = {}) {
   return fn;
 }
 
+/** 5일치 반: 2026-10-08 부터 등교일 (10/9 한글날 제외) */
+export const WEEK_DAYS = ['2026-10-08', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15'];
+
+/**
+ * WEEK_DAYS 동안 모든 학생이 매일 기록을 남기되, misses[번호] 에 적힌 날은 기록이 없다.
+ * 4번은 기록 없이 접속만 하고, 12번은 마지막 단계(L27)를 통과했다.
+ */
+export function weekDb(misses = {}) {
+  const students = [...SAMPLE_NAMES.map((name, i) => ({ no: String(i + 1), name })), { no: '99', name: '테스트' }];
+  const results = [];
+  const logs = [];
+  for (const day of WEEK_DAYS) {
+    for (const st of students) {
+      if ((misses[st.no] || []).includes(day)) continue;
+      if (st.no === '4') logs.push({ studentNo: '4', ts: kstMillis(day, 9, 30) });
+      else results.push({ dateKey: day, studentNo: st.no, mode: 'free', level: 'L3', score: null });
+    }
+  }
+  results.push({ dateKey: '2026-09-01', studentNo: '12', mode: 'challenge', level: 'L27', score: 220 });
+  return { TEST01: { name: '5학년 4반', offDays: [], students, results, logs } };
+}
+
 /** 한국 시간 dateKey 의 hh 시(밀리초). 접속 기록(logs)의 ts 형식 */
 export function kstMillis(dateKey, hour = 10, minute = 0) {
   const [y, m, d] = dateKey.split('-').map(Number);

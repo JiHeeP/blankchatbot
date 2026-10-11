@@ -304,6 +304,44 @@ h1, h2, p { margin: 0; }
 .math-notes { font-size: clamp(16px, 1.3vw, 22px); text-align: center; }
 .math-error { display: flex; flex-direction: column; gap: 10px; align-items: center; }
 
+/* ---- 누적 벌 대상: 아래에 큰 이름 ---- */
+.penalty {
+  margin-top: 8px;
+  border: 3px solid var(--danger);
+  background: #fff5f5;
+  border-radius: var(--radius);
+  padding: clamp(14px, 1.6vw, 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.penalty-title { font-size: clamp(20px, 2vw, 34px); font-weight: 900; color: var(--danger); }
+.penalty-title small { font-size: .5em; font-weight: 600; color: var(--ink-2); }
+.penalty-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 14px; }
+.penalty-card {
+  background: #fff;
+  border: 2px solid #fca5a5;
+  border-radius: 18px;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px 18px;
+  flex-wrap: wrap;
+}
+.penalty-who { display: flex; align-items: baseline; gap: 12px; margin-right: auto; }
+.penalty-no { font-size: clamp(18px, 1.8vw, 30px); font-weight: 800; color: var(--danger); }
+.penalty-name { font-size: clamp(34px, 4.8vw, 92px); font-weight: 900; color: var(--danger); line-height: 1.1; word-break: keep-all; }
+.penalty-count { font-size: clamp(20px, 2vw, 34px); font-weight: 800; color: var(--ink); background: var(--danger-soft); border-radius: 999px; padding: 4px 16px; white-space: nowrap; }
+.penalty-clear { white-space: nowrap; border-color: var(--danger); color: var(--danger); }
+.popup .penalty { padding: 10px; gap: 8px; }
+.popup .penalty-title { font-size: 18px; }
+.popup .penalty-title small { display: none; }
+.popup .penalty-card { padding: 8px 12px; }
+.popup .penalty-name { font-size: 34px; }
+.popup .penalty-no { font-size: 16px; }
+.popup .penalty-count { font-size: 16px; }
+.popup .view { overflow-y: auto; }
+
 /* ---- 우리 반 ---- */
 .class-page { max-width: 860px; }
 .class-page h2 { font-size: 22px; }

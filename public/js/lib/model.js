@@ -1,5 +1,7 @@
 // 화면·저장소가 같이 쓰는 순수 함수들 (Firebase 와 무관, Node 테스트 가능)
 
+import { parseDate } from './schoolday.js';
+
 export class AppError extends Error {
   constructor(code, message, extra = {}) {
     super(message);
@@ -95,6 +97,20 @@ export function validateMathCode(code) {
   const c = String(code || '').trim().toUpperCase();
   if (c && !/^[A-Z0-9]{4,12}$/.test(c)) throw new AppError('invalid', '수학 반 코드는 영문·숫자로 적어 주세요 (보통 6글자)');
   return c;
+}
+
+/** 누적 세기 시작일: 읽을 수 있는 날짜만. 'YYYY-MM-DD' 로 돌려준다 */
+export function validateCountStart(text) {
+  const d = parseDate(text);
+  if (!d) throw new AppError('invalid', '누적 세기 시작일을 날짜로 적어 주세요 (예: 2026-10-08)');
+  return d;
+}
+
+/** 벌 기준 횟수: 1~30 사이 정수 */
+export function validateLimit(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > 30) throw new AppError('invalid', '벌 기준 횟수는 1~30 사이 숫자로 적어 주세요');
+  return n;
 }
 
 /** 과제 체크 요약: 완료 수, 아직 안 한 학생 */

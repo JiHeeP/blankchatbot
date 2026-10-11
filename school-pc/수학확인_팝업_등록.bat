@@ -38,7 +38,7 @@ if "%CH%"=="5" set POS=c
 rem the launcher that opens the small window (Edge is installed on every Windows 10/11 PC)
 rem the page itself moves the window to the chosen corner every time, so the spot never drifts
 > "%~dp0open_math_popup.bat" echo @echo off
->> "%~dp0open_math_popup.bat" echo start "" msedge --app="%SITE%/?popup=1&pos=%POS%" --window-size=560,520
+>> "%~dp0open_math_popup.bat" echo start "" msedge --app="%SITE%/?popup=1&pos=%POS%" --window-size=560,620
 
 schtasks /create /tn "ClassroomMathPopup" /tr "\"%~dp0open_math_popup.bat\"" /sc weekly /d MON,TUE,WED,THU,FRI /st 08:30 /f
 if errorlevel 1 (

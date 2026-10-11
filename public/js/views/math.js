@@ -1,11 +1,13 @@
 // 03 수학 확인: 분수 연산 마스터에서 이전 등교일에 안 한 학생
-import { el, onTap } from '../ui.js';
+import { el, onTap, confirmBox, toast } from '../ui.js';
 import { todayKST } from '../lib/schoolday.js';
 
 const AUTO_REFRESH_MS = 10 * 60 * 1000;
 
 const m = {
-  sig: '',        // 반 코드·기준·쉬는 날이 바뀌면 다시 받아온다
+  sig: '',        // 반 코드·쉬는 날·누적 설정·해제가 바뀌면 다시 받아온다
+  code: '',       // 마지막으로 받아온 수학 반 코드 (다른 반이면 이전 결과를 지움)
+  again: false,   // 받아오는 중에 설정이 또 바뀌면 끝난 뒤 한 번 더
   report: null,
   error: null,
   loading: false,
@@ -14,12 +16,16 @@ const m = {
 };
 
 function signature(room) {
-  return [room.mathCode, room.offDaysText, room.mathExcludeText,
+  return [room.mathCode, room.offDaysText, room.mathExcludeText, room.mathCountStart, room.mathLimit,
+    JSON.stringify(room.mathCleared || {}),
     room.roster.map((s) => `${s.no}:${s.name}`).join(',')].join('|');
 }
 
 async function load(ctx, refresh = false) {
-  if (m.loading) return;
+  if (m.loading) {
+    m.again = true;
+    return;
+  }
   m.loading = true;
   if (ctx.tab === 'math') ctx.rerender();
   try {
@@ -31,7 +37,12 @@ async function load(ctx, refresh = false) {
   } finally {
     m.loading = false;
     m.loadedAt = Date.now();
-    if (ctx.tab === 'math') ctx.rerender();
+    if (m.again) {
+      m.again = false;
+      queueMicrotask(() => load(ctx));
+    } else if (ctx.tab === 'math') {
+      ctx.rerender();
+    }
   }
 }
 
@@ -41,6 +52,34 @@ function schedule(ctx) {
     if (ctx.tab === 'math' && document.visibilityState === 'visible') load(ctx);
     schedule(ctx);
   }, AUTO_REFRESH_MS);
+}
+
+const shortDate = (key) => `${Number(key.slice(5, 7))}/${Number(key.slice(8, 10))}`;
+
+async function clearPenalty(ctx, r, s) {
+  const ok = await confirmBox(`${s.no}번 ${s.name} 해제`,
+    `벌을 받은 것으로 처리해요.\n지금까지 누적 ${s.count}회가 지워지고, 다음 등교일부터 0회에서 다시 세요.`,
+    { ok: '해제하고 0부터', danger: true });
+  if (!ok) return;
+  try {
+    await ctx.store.clearMathCount(s.no, r.dateKey);
+    toast(`${s.name} 학생의 누적을 0으로 되돌렸어요`, 'ok');
+  } catch (e) {
+    ctx.fail(e);
+  }
+}
+
+/** 누적 기준 이상인 학생: 아래에 큰 이름으로 따로. 벌을 받으면 '해제' */
+function penaltySection(ctx, r) {
+  if (!r.overLimit?.length) return null;
+  const popup = document.body.classList.contains('popup');
+  return el('section.penalty',
+    el('h2.penalty-title', `⚠ 누적 ${r.limit}회 이상`,
+      el('small', ` · ${shortDate(r.countStart)}부터 ${r.dateLabel}까지 안 한 날을 센 횟수`)),
+    el('div.penalty-list', r.overLimit.map((s) => el('div.penalty-card',
+      el('div.penalty-who', el('span.penalty-no', `${s.no}번`), el('span.penalty-name', s.name)),
+      el('span.penalty-count', `누적 ${s.count}회`),
+      popup ? null : onTap(el('button.btn.penalty-clear', { type: 'button' }, '벌 받음 · 해제'), () => clearPenalty(ctx, r, s))))));
 }
 
 export function render(root, ctx, { changedTab } = {}) {
@@ -58,10 +97,11 @@ export function render(root, ctx, { changedTab } = {}) {
   const sig = signature(room);
   const stale = Date.now() - m.loadedAt > AUTO_REFRESH_MS;
   if (sig !== m.sig || (changedTab && stale) || (!m.report && !m.error && !m.loading)) {
-    if (sig !== m.sig) {
-      m.report = null;
+    if (room.mathCode !== m.code) {
+      m.report = null; // 다른 반이면 이전 결과를 보여 주지 않음. 같은 반이면 새 결과가 올 때까지 이전 결과를 그대로 둠
       m.error = null;
     }
+    m.code = room.mathCode;
     m.sig = sig;
     queueMicrotask(() => load(ctx));
     schedule(ctx);
@@ -98,12 +138,16 @@ export function render(root, ctx, { changedTab } = {}) {
     r.excluded?.length ? `항상 제외: ${r.excluded.map((s) => s.name).join(', ')}` : '',
   ].filter(Boolean);
   const skipNote = skipped.length ? el('p.muted.math-notes', `세지 않음 — ${skipped.join(' · ')}`) : null;
+  const watchNote = r.watch?.length
+    ? el('p.muted.math-notes', `누적 지켜보기 (${r.limit}회 미만) — ${r.watch.map((s) => `${s.no}번 ${s.name} ${s.count}회`).join(' · ')}`)
+    : null;
 
   root.replaceChildren(el('div.page',
     el('div.page-head', title, refreshBtn),
     el('div.card.math-card', names),
     el('p.muted.math-notes', notes.join(' · ')),
-    skipNote, warn, offNote,
+    skipNote, watchNote, warn, offNote,
+    penaltySection(ctx, r),
     el('p.muted.small', '설날·추석·재량휴업일처럼 해마다 바뀌는 쉬는 날은 우리 반 탭의 "등교 안 하는 날"에 적어 주세요.')));
 }
 

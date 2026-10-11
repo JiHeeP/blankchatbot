@@ -28,7 +28,7 @@ function placePopupWindow() {
   const q = new URLSearchParams(location.search);
   const pos = ['tr', 'br', 'tl', 'bl', 'c'].includes(q.get('pos')) ? q.get('pos') : 'tr';
   const w = Number(q.get('w')) || 560;
-  const h = Number(q.get('h')) || 520;
+  const h = Number(q.get('h')) || 620;
   const margin = 16;
   const apply = () => {
     try {
