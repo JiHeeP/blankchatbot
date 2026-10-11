@@ -49,7 +49,9 @@ export function render(root, ctx, { changedTab } = {}) {
     root.replaceChildren(el('div.empty',
       el('p.empty-big', '수학 반 코드가 아직 없어요'),
       el('p', '분수 연산 마스터 교사 화면 위쪽에 있는 반 코드(6글자)를 우리 반 탭에 적어 주세요.'),
-      onTap(el('button.btn.primary.btn-xl', { type: 'button' }, '우리 반 탭으로'), () => ctx.go('class'))));
+      document.body.classList.contains('popup')
+        ? null
+        : onTap(el('button.btn.primary.btn-xl', { type: 'button' }, '우리 반 탭으로'), () => ctx.go('class'))));
     return;
   }
 

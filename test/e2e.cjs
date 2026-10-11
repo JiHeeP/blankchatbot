@@ -189,6 +189,17 @@ async function main() {
   await page.locator('.save-btn').waitFor();
   assert(await page.locator('.chip', { hasText: '수학 익힘책 34쪽' }).count() === 1, '다시 열면 체크 화면으로 돌아옴');
 
+  console.log('학교 PC 팝업 (?popup=1)');
+  const pop = await board.newPage();
+  await pop.setViewportSize({ width: 560, height: 760 });
+  await pop.goto(`${SITE}/?emulator=${EMU}&room=${ROOM}&popup=1`);
+  await pop.locator('.name-chip').first().waitFor({ timeout: 10000 });
+  assert(await pop.locator('.tabs').isHidden(), '팝업에는 메뉴 탭이 없음');
+  const popNames = await pop.locator('.name-chip').allTextContents();
+  assert(popNames.length === 2 && popNames.join(',').includes('조하준'), `팝업에 안 한 학생 2명: ${popNames.join(', ')}`);
+  await shot(pop, '05-popup');
+  await pop.close();
+
   assert(errors.filter((e) => !/offline|ERR_INTERNET_DISCONNECTED|Could not reach Cloud Firestore/i.test(e)).length === 0,
     `페이지 오류 없음 ${errors.length ? `(무시한 오프라인 오류 ${errors.length}건)` : ''}`);
   await browser.close();

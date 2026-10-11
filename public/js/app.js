@@ -11,6 +11,9 @@ import { renderSetup } from './views/setup.js';
 
 const VIEWS = { check: checkView, draw: drawView, math: mathView, class: classView };
 const DEFAULT_TAB = 'check';
+// ?popup=1 : 학교 PC 바탕화면 팝업용. 메뉴 없이 수학 확인 화면만 작게 보여 준다.
+const POPUP = new URLSearchParams(location.search).has('popup');
+if (POPUP) document.body.classList.add('popup');
 
 const viewRoot = document.getElementById('view');
 const banner = document.getElementById('banner');
@@ -50,6 +53,7 @@ function friendlyError(e) {
 }
 
 function currentTab() {
+  if (POPUP) return 'math';
   const t = location.hash.replace('#', '');
   return VIEWS[t] ? t : DEFAULT_TAB;
 }

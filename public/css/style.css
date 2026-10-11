@@ -388,5 +388,16 @@ details.sub .input { margin: 10px 0; }
   .save-btn { width: 100%; order: 5; }
 }
 
+/* ---- 학교 PC 팝업 (?popup=1): 메뉴 없이 수학 확인만 작은 창으로 ---- */
+.popup .tabs, .popup #fullscreen { display: none; }
+.popup .topbar { padding: 6px 14px; }
+.popup .view { padding: 10px 12px; }
+.popup .page-title { font-size: 20px; }
+.popup .math-card { min-height: 0; padding: 14px; }
+.popup .name-chips { gap: 8px; }
+.popup .name-chip { font-size: 24px; padding: 6px 14px; border-radius: 14px; }
+.popup .all-done { font-size: 30px; }
+.popup .math-notes, .popup .muted { font-size: 13px; }
+
 /* 칠판에서 전체 화면일 때는 여백을 줄여 칸을 더 크게 */
 :fullscreen .view { padding: 10px; }
