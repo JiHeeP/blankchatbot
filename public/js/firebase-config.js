@@ -1,17 +1,17 @@
 // ============================================================
-//  Firebase 설정값 (README 의 '2. Firebase 만들기' 참고)
+//  Firebase 설정값 (README 의 '1-1. Firebase 프로젝트 만들기' 참고)
 //  Firebase 콘솔 → 프로젝트 설정(톱니바퀴) → 내 앱 → 웹 앱 → 'SDK 설정 및 구성'
 //  → 'const firebaseConfig = { ... }' 안의 값을 그대로 옮겨 적으세요.
 //  이 값들은 사이트에 공개되는 값이라 비밀이 아닙니다.
 // ============================================================
 
 export const firebaseConfig = {
-  apiKey: '',
-  authDomain: '',
-  projectId: '',
-  storageBucket: '',
-  messagingSenderId: '',
-  appId: '',
+  apiKey: 'AIzaSyDgvpDwa3iEjf1iFVvugQp-DQA4gdWlITc',
+  authDomain: 'studnet-5c33c.firebaseapp.com',
+  projectId: 'studnet-5c33c',
+  storageBucket: 'studnet-5c33c.firebasestorage.app',
+  messagingSenderId: '52216029412',
+  appId: '1:52216029412:web:1784908b5185de4a5d4cf1',
 };
 
 // 한 Firebase 프로젝트로 반을 여러 개 운영하고 싶으면 반마다 다른 이름을 쓰세요.
