@@ -1,0 +1,17 @@
+rules_version = '2';
+
+// 교실 관리 사이트용 규칙
+// - rooms/ 아래만 읽고 쓸 수 있다. 그 밖은 모두 막는다.
+// - 잠금(로그인) 없이 쓰는 사이트라서, 주소와 설정값을 아는 사람은 기록을 고칠 수 있다.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{room} {
+      allow read: if true;
+      allow write: if request.resource == null || request.resource.data.size() < 30;
+
+      match /{sub=**} {
+        allow read, write: if true;
+      }
+    }
+  }
+}

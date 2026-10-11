@@ -10,5 +10,8 @@
   "scripts": {
     "dev": "node dev-server.js",
     "test": "node --test \"test/*.test.js\""
+  },
+  "devDependencies": {
+    "firebase": "10.14.1"
   }
 }

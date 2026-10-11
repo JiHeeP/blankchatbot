@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SchoolCalendar, publicHolidays, parseDate, parseOffDays, label, todayKST } from '../lib/schoolday.js';
+import { SchoolCalendar, publicHolidays, parseDate, parseOffDays, label, todayKST } from '../public/js/lib/schoolday.js';
 
 test('개천절(토) → 10/5(월) 대체공휴일', () => {
   assert.ok(publicHolidays(2026).has('2026-10-05'));

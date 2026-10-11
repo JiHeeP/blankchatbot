@@ -1,5 +1,6 @@
 // 분수 연산 마스터(mathpractice) 읽기 — 예전 math_alert.py 를 옮긴 것
 // mathpractice 의 Firestore 는 반 코드만 알면 명단·기록을 읽을 수 있다 (REST, 키는 공개용 웹 키).
+// 브라우저와 Node(테스트) 양쪽에서 동작한다.
 
 import { SchoolCalendar, parseOffDays, todayKST, timeKST, label } from './schoolday.js';
 
@@ -15,13 +16,15 @@ export class MathError extends Error {
   }
 }
 
-function firestoreBase() {
-  return process.env.MATH_FIRESTORE_BASE
-    || `https://firestore.googleapis.com/v1/projects/${process.env.MATH_PROJECT_ID || DEFAULT_PROJECT_ID}/databases/(default)/documents`;
-}
+export const DEFAULT_BASE = `https://firestore.googleapis.com/v1/projects/${DEFAULT_PROJECT_ID}/databases/(default)/documents`;
 
-function apiKey() {
-  return process.env.MATH_API_KEY ?? DEFAULT_API_KEY;
+/** 오래된 브라우저(전자칠판)에는 AbortSignal.timeout 이 없을 수 있다. */
+function timeoutSignal(ms) {
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) return AbortSignal.timeout(ms);
+  if (typeof AbortController === 'undefined') return undefined;
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
 }
 
 /** Firestore 값 객체 → JS 값 */
@@ -60,16 +63,18 @@ export function sortByNo(list) {
 }
 
 export class MathPracticeClient {
-  constructor(classCode, fetchImpl = globalThis.fetch) {
+  constructor(classCode, { fetchImpl, base = DEFAULT_BASE, apiKey = DEFAULT_API_KEY } = {}) {
     this.code = String(classCode || '').trim().toUpperCase();
-    this.fetch = fetchImpl;
+    this.fetch = fetchImpl || ((...a) => globalThis.fetch(...a));
+    this.base = base;
+    this.apiKey = apiKey;
   }
 
   url(path, params = {}) {
     const q = new URLSearchParams(params);
-    if (apiKey()) q.set('key', apiKey());
+    if (this.apiKey) q.set('key', this.apiKey);
     const qs = q.toString();
-    return `${firestoreBase()}/${path}${qs ? `?${qs}` : ''}`;
+    return `${this.base}/${path}${qs ? `?${qs}` : ''}`;
   }
 
   async call(path, { body, params } = {}) {
@@ -77,9 +82,9 @@ export class MathPracticeClient {
     try {
       res = await this.fetch(this.url(path, params), {
         method: body ? 'POST' : 'GET',
-        headers: { 'Content-Type': 'application/json' },
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
         body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: timeoutSignal(TIMEOUT_MS),
       });
     } catch {
       throw new MathError('network', '분수 연산 마스터에 연결하지 못했어요 (인터넷 연결 확인)');
@@ -144,9 +149,9 @@ export class MathPracticeClient {
  * 이전 등교일에 수학을 하지 않은 학생 목록.
  * roster 가 있으면 번호가 같은 학생의 이름은 우리 반 명단 이름을 쓴다.
  */
-export async function buildReport({ classCode, mode = 'any', offDays = [], roster = [], now = new Date(), fetchImpl } = {}) {
+export async function buildReport({ classCode, mode = 'any', offDays = [], roster = [], now = new Date(), fetchImpl, base } = {}) {
   if (!classCode) throw new MathError('nocode', '우리 반 탭에서 수학 반 코드를 먼저 적어 주세요', 400);
-  const client = new MathPracticeClient(classCode, fetchImpl);
+  const client = new MathPracticeClient(classCode, { fetchImpl, base });
   const cls = await client.fetchClass();
   const today = todayKST(now);
   const cal = new SchoolCalendar([...offDays, ...cls.offDays]);

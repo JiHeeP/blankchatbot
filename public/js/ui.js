@@ -29,13 +29,18 @@ function append(node, children) {
   }
 }
 
-/** 전자칠판은 한 번 눌러도 두 번 들어오는 경우가 있어서, 같은 대상은 잠깐 막는다. */
-const lastTap = new WeakMap();
-export function onTap(node, fn, lockMs = 400) {
+/**
+ * 전자칠판은 한 번 눌러도 두 번 들어오는 경우가 있어서, 같은 대상은 잠깐 막는다.
+ * 화면이 다시 그려져도 막히도록 key(예: 과제id:학생id)로 기억한다.
+ */
+const lastTap = new Map();
+export function onTap(node, fn, { key, lockMs = 450 } = {}) {
+  const k = key || node;
   node.addEventListener('click', (e) => {
     const t = Date.now();
-    if (t - (lastTap.get(node) || 0) < lockMs) return;
-    lastTap.set(node, t);
+    if (t - (lastTap.get(k) || 0) < lockMs) return;
+    lastTap.set(k, t);
+    if (!key) setTimeout(() => lastTap.delete(k), lockMs);
     fn(e);
   });
   return node;
@@ -134,13 +139,6 @@ export function menuBox(title, items) {
         type: 'button', on: { click: () => close(value) },
       }, label))),
     el('div.modal-actions', el('button.btn', { type: 'button', on: { click: () => close(null) } }, '닫기')));
-  });
-}
-
-export function sortByNo(students) {
-  return [...students].sort((a, b) => {
-    const [x, y] = [Number(a.no), Number(b.no)];
-    return (Number.isNaN(x) ? 1e9 : x) - (Number.isNaN(y) ? 1e9 : y) || String(a.no).localeCompare(String(b.no));
   });
 }
 

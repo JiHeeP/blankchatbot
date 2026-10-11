@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReport, MathError, MathPracticeClient } from '../lib/mathpractice.js';
+import { buildReport, MathError, MathPracticeClient } from '../public/js/lib/mathpractice.js';
 import { fakeFirestoreFetch, sampleDb } from './fake-firestore.js';
 
 // 한국 시간 2026-10-11(일) 오전 → 이전 등교일 10/8(목)
@@ -39,7 +39,7 @@ test('반 설정의 등교 안 하는 날 반영', async () => {
 
 test('명단 여러 페이지', async () => {
   const fetch = fakeFirestoreFetch(sampleDb('2026-10-08'), { pageSize: 5 });
-  const students = await new MathPracticeClient('TEST01', fetch).fetchStudents();
+  const students = await new MathPracticeClient('TEST01', { fetchImpl: fetch }).fetchStudents();
   assert.equal(students.length, 18);
   assert.equal(students[17].no, '18');
 });
