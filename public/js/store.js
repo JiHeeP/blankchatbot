@@ -1,6 +1,6 @@
 // Firestore 저장소
 // 구조 (모두 rooms/{room} 아래)
-//   rooms/{room}                    { className, mathCode, mathMode, offDaysText, mathExcludeText, roster: [{id,no,name}] }
+//   rooms/{room}                    { className, mathCode, offDaysText, mathExcludeText, roster: [{id,no,name}] }
 //   rooms/{room}/assignments/{id}   { title, createdAt, closedAt?, done: { 학생id: 완료시각 } }
 //                                   closedAt 이 있으면 '저장한 기록'(지난 과제)
 //   rooms/{room}/draws/{id}         { title, min, max, createdAt, picks: { 번호: {sid,no,name,at} }, byStudent: { 학생id: 번호 } }
@@ -33,7 +33,6 @@ export function createStore(fs, db, room = 'main') {
     return {
       className: data.className || '',
       mathCode: data.mathCode || '',
-      mathMode: data.mathMode === 'challenge' ? 'challenge' : 'any',
       offDaysText: data.offDaysText || '',
       // 한 번도 저장한 적이 없으면 기본 제외 명단
       mathExcludeText: typeof data.mathExcludeText === 'string' ? data.mathExcludeText : DEFAULT_EXCLUDE_TEXT,
@@ -122,7 +121,6 @@ export function createStore(fs, db, room = 'main') {
     const data = {};
     if ('className' in patch) data.className = cleanText(patch.className, 30);
     if ('mathCode' in patch) data.mathCode = validateMathCode(patch.mathCode);
-    if ('mathMode' in patch) data.mathMode = patch.mathMode === 'challenge' ? 'challenge' : 'any';
     if ('offDaysText' in patch) data.offDaysText = String(patch.offDaysText || '').slice(0, 5000);
     if ('mathExcludeText' in patch) data.mathExcludeText = String(patch.mathExcludeText || '').slice(0, 2000);
     await fs.setDoc(roomRef, { ...data, updatedAt: fs.serverTimestamp() }, { merge: true });
@@ -235,7 +233,7 @@ export function createStore(fs, db, room = 'main') {
    */
   async function getMath(room, { refresh = false, fetchImpl, base, at = new Date() } = {}) {
     if (!room.mathCode) throw new AppError('nocode', '우리 반 탭에서 수학 반 코드를 먼저 적어 주세요');
-    const sig = [room.mathCode, room.mathMode, room.offDaysText, room.mathExcludeText, todayKST(at)].join('|');
+    const sig = [room.mathCode, room.offDaysText, room.mathExcludeText, todayKST(at)].join('|');
 
     let cached = null;
     try {
@@ -252,7 +250,6 @@ export function createStore(fs, db, room = 'main') {
     try {
       const report = await buildReport({
         classCode: room.mathCode,
-        mode: room.mathMode,
         offDays: parseOffDays(room.offDaysText),
         roster: room.roster,
         excludeNames: parseNames(room.mathExcludeText),
@@ -309,7 +306,6 @@ export function createStore(fs, db, room = 'main') {
     batch.set(roomRef, {
       className: cleanText(r.className, 30),
       mathCode: validateMathCode(r.mathCode),
-      mathMode: r.mathMode === 'challenge' ? 'challenge' : 'any',
       offDaysText: String(r.offDaysText || ''),
       mathExcludeText: typeof r.mathExcludeText === 'string' ? r.mathExcludeText : DEFAULT_EXCLUDE_TEXT,
       roster,

@@ -14,7 +14,7 @@ const m = {
 };
 
 function signature(room) {
-  return [room.mathCode, room.mathMode, room.offDaysText, room.mathExcludeText,
+  return [room.mathCode, room.offDaysText, room.mathExcludeText,
     room.roster.map((s) => `${s.no}:${s.name}`).join(',')].join('|');
 }
 
@@ -86,7 +86,7 @@ export function render(root, ctx, { changedTab } = {}) {
 
   const notes = [
     `${r.total}명 중 ${r.done}명 함`,
-    r.mode === 'challenge' ? '도전 기록만 셈' : '연습·도전 아무 기록',
+    r.accessOnly ? `접속만 한 ${r.accessOnly}명 포함` : '접속하거나 시작했으면 함',
     `${r.fetchedDate && r.fetchedDate !== todayKST() ? `${r.fetchedDate.slice(5).replace('-', '/')} ` : ''}${r.fetchedAt} 확인`,
   ];
   const warn = r.stale

@@ -17,7 +17,7 @@ function roomDoc(extra = {}) {
   }));
   return {
     fields: {
-      className: sv('5학년 4반'), mathCode: sv('TEST01'), mathMode: sv('any'),
+      className: sv('5학년 4반'), mathCode: sv('TEST01'),
       offDaysText: sv(''), mathExcludeText: sv('테스트'), roster: { arrayValue: { values: roster } },
       ...extra,
     },

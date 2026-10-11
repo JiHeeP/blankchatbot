@@ -69,7 +69,6 @@ export async function readRoom(config, room, fetchImpl) {
   return {
     className: d.className || '',
     mathCode: d.mathCode || '',
-    mathMode: d.mathMode === 'challenge' ? 'challenge' : 'any',
     offDaysText: d.offDaysText || '',
     mathExcludeText: typeof d.mathExcludeText === 'string' ? d.mathExcludeText : DEFAULT_EXCLUDE_TEXT,
     roster: Array.isArray(d.roster) ? d.roster : [],
@@ -176,7 +175,6 @@ export async function runNotify({
 
   const report = await buildReport({
     classCode: roomData.mathCode,
-    mode: roomData.mathMode,
     offDays: parseOffDays(roomData.offDaysText),
     roster: roomData.roster,
     excludeNames: parseNames(roomData.mathExcludeText),

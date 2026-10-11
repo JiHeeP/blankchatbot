@@ -137,7 +137,7 @@ function settingsSection(ctx) {
   const save = async () => {
     try {
       await ctx.store.saveSettings({
-        className: s.className, mathCode: s.mathCode, mathMode: s.mathMode, offDaysText: s.offDaysText,
+        className: s.className, mathCode: s.mathCode, offDaysText: s.offDaysText,
         mathExcludeText: s.mathExcludeText,
       });
       draft.settingsDirty = false;
@@ -158,10 +158,7 @@ function settingsSection(ctx) {
         on: { input: (e) => { s.mathCode = e.target.value.toUpperCase(); touch(); } },
       }),
       el('span.field-hint', '교사 화면 위쪽에 있는 6글자. 비워 두면 수학 확인이 꺼져요.')),
-    el('label.field', el('span.field-label', '수학을 "했다"로 볼 기준'),
-      el('select.input', { on: { change: (e) => { s.mathMode = e.target.value; touch(); } } },
-        el('option', { value: 'any', selected: s.mathMode !== 'challenge' }, '연습·도전 아무 기록이나'),
-        el('option', { value: 'challenge', selected: s.mathMode === 'challenge' }, '도전 기록만'))),
+    el('p.field-hint', '수학을 "했다"로 보는 기준: 그날 분수 연산 마스터에 접속해서 화면을 켰거나, 연습·도전을 시작했으면(중간에 그만둬도) 했다고 봐요.'),
     el('label.field', el('span.field-label', `등교 안 하는 날 (${offDays.length}일)`),
       el('textarea.input', {
         rows: 6, value: s.offDaysText,

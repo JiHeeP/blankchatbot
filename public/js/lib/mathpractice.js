@@ -16,6 +16,13 @@ export const FINAL_PASS_SCORE = 216;
 // 수학 확인에서 항상 빼는 이름 (우리 반 탭에서 바꿀 수 있음)
 export const DEFAULT_EXCLUDE_TEXT = '전지현\n테스트';
 
+/** 한국 시간 하루 [시작, 다음 날 시작) 의 밀리초. 접속 기록(logs)의 ts 가 밀리초라서 필요 */
+export function kstDayRange(dateKey) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const start = Date.UTC(y, m - 1, d) - 9 * 3600 * 1000;
+  return [start, start + 24 * 3600 * 1000];
+}
+
 /** 줄·쉼표로 나뉜 이름 목록. '#' 뒤는 메모 */
 export function parseNames(text) {
   const out = new Set();
@@ -164,8 +171,32 @@ export class MathPracticeClient {
     return passed;
   }
 
-  /** dateKey 날짜에 기록이 있는 학생 번호 Set */
-  async fetchDone(dateKey, challengeOnly = false) {
+  /**
+   * dateKey(한국 시간) 하루 동안 분수 연산 마스터에 접속(로그인)한 학생 번호 Set.
+   * 학생이 화면을 켜고 들어오면 연습·도전을 안 풀어도 접속 기록(logs)이 남는다.
+   */
+  async fetchAccessed(dateKey) {
+    const [start, end] = kstDayRange(dateKey);
+    const range = (op, v) => ({ fieldFilter: { field: { fieldPath: 'ts' }, op, value: { integerValue: String(v) } } });
+    const body = {
+      structuredQuery: {
+        from: [{ collectionId: 'logs' }],
+        where: { compositeFilter: { op: 'AND', filters: [range('GREATER_THAN_OR_EQUAL', start), range('LESS_THAN', end)] } },
+        limit: 5000,
+      },
+    };
+    const rows = await this.call(`classes/${encodeURIComponent(this.code)}:runQuery`, { body });
+    const accessed = new Set();
+    for (const row of rows || []) {
+      if (!row.document) continue;
+      const f = fields(row.document);
+      if (f.studentNo != null) accessed.add(String(f.studentNo));
+    }
+    return accessed;
+  }
+
+  /** dateKey 날짜에 연습·도전 기록(중간에 그만둔 것 포함)이 있는 학생 번호 Set */
+  async fetchDone(dateKey) {
     const body = {
       structuredQuery: {
         from: [{ collectionId: 'results' }],
@@ -178,7 +209,6 @@ export class MathPracticeClient {
     for (const row of rows || []) {
       if (!row.document) continue;
       const f = fields(row.document);
-      if (challengeOnly && f.mode !== 'challenge') continue;
       if (f.studentNo != null) done.add(String(f.studentNo));
     }
     return done;
@@ -189,9 +219,10 @@ export class MathPracticeClient {
  * 이전 등교일에 수학을 하지 않은 학생 목록.
  * - roster 가 있으면 번호가 같은 학생의 이름은 우리 반 명단 이름을 쓴다.
  * - 마지막 단계(L27)를 통과한 학생과 excludeNames 에 있는 이름은 세지 않는다.
+ * - '했다' 기준: 그날 분수 연산 마스터에 접속했거나(화면을 켜서 시작), 연습·도전 기록이 있으면.
  */
 export async function buildReport({
-  classCode, mode = 'any', offDays = [], roster = [], excludeNames = [], now = new Date(), fetchImpl, base,
+  classCode, offDays = [], roster = [], excludeNames = [], now = new Date(), fetchImpl, base,
 } = {}) {
   if (!classCode) throw new MathError('nocode', '우리 반 탭에서 수학 반 코드를 먼저 적어 주세요', 400);
   const client = new MathPracticeClient(classCode, { fetchImpl, base });
@@ -201,11 +232,13 @@ export async function buildReport({
   const prev = cal.prevSchoolDay(today);
   if (!prev) throw new MathError('http', '이전 등교일을 찾을 수 없어요');
 
-  const [students, done, finalPassed] = await Promise.all([
+  const [students, withRecord, accessed, finalPassed] = await Promise.all([
     client.fetchStudents(),
-    client.fetchDone(prev, mode === 'challenge'),
+    client.fetchDone(prev),
+    client.fetchAccessed(prev),
     client.fetchFinalPassed(),
   ]);
+  const done = new Set([...withRecord, ...accessed]);
   const nameByNo = new Map(roster.map((s) => [String(s.no), s.name]));
   const excludeSet = new Set(excludeNames.map((n) => String(n).trim()).filter(Boolean));
   const counted = [];
@@ -219,6 +252,7 @@ export async function buildReport({
     else counted.push(entry);
   }
   const missing = counted.filter((s) => !done.has(s.no));
+  const accessOnly = counted.filter((s) => accessed.has(s.no) && !withRecord.has(s.no));
 
   return {
     classCode: client.code,
@@ -230,10 +264,10 @@ export async function buildReport({
     total: counted.length,
     graduated,
     excluded,
+    accessOnly: accessOnly.length, // 기록은 없지만 접속해서 '했다'로 센 학생 수
     finalLevel: FINAL_LEVEL,
     fetchedAt: timeKST(now),
     fetchedDate: today,
     todayOff: cal.whyOff(today),
-    mode,
   };
 }
