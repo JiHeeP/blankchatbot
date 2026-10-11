@@ -16,7 +16,9 @@ if "%SITE%"=="" (
   exit /b 1
 )
 
-rem remove a trailing slash
+rem keep only the site address: drop anything after # or ? (for example /#check), add https:// if missing
+for /f "tokens=1 delims=#?" %%a in ("%SITE%") do set SITE=%%a
+echo %SITE%| findstr /i /b "http" >nul || set SITE=https://%SITE%
 if "%SITE:~-1%"=="/" set SITE=%SITE:~0,-1%
 
 rem the launcher that opens the small window (Edge is installed on every Windows 10/11 PC)
@@ -37,7 +39,10 @@ if /i "%LOGON%"=="y" schtasks /create /tn "ClassroomMathPopupLogon" /tr "\"%~dp0
 
 echo.
 echo  Done. The popup opens every weekday at 08:30 (the PC must be on and logged in).
-echo  Test it now: double-click  open_math_popup.bat  in this folder.
+echo  Address used: %SITE%
 echo  Keep this folder where it is. If you move it, run this file again.
+echo.
+set /p NOW=Open the popup now to check it? (y/n): 
+if /i "%NOW%"=="y" start "" "%~dp0open_math_popup.bat"
 echo.
 pause
